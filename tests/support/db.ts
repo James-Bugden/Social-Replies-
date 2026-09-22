@@ -96,6 +96,16 @@ const AUTH_SHIM = `
   grant usage on schema auth to anon, authenticated;
   grant execute on function auth.uid() to anon, authenticated;
   grant select on auth.users to authenticated;
+
+  -- Supabase's own default privileges, reproduced deliberately.
+  --
+  -- On a hosted project, every function created in \`public\` is granted EXECUTE to
+  -- anon and authenticated automatically. Without this line the local harness is
+  -- more permissive-looking than production in the one direction that matters:
+  -- a \`revoke ... from public\` looks sufficient here while leaving the function
+  -- callable by anon there. Found by running the hosted security advisor against
+  -- a schema whose local tests were green.
+  alter default privileges in schema public grant execute on functions to anon, authenticated;
 `;
 
 export function migrationFiles(): string[] {

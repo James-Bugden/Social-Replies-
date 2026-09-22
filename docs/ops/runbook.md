@@ -63,3 +63,26 @@ fabricated successful generation.
 
 Deployment is SR-020 (#21) and is not performed from this runbook. It needs owner authority for
 the Vercel project, the `replies.jamesbugden.com` DNS record and the provider credentials.
+
+## Database
+
+The application database is the Supabase project `Career`
+(`avpntrdnqlrjfmfdagfj`, ap-southeast-2). It was empty — zero tables, zero auth
+users — so it was repurposed rather than paying for an additional project. It is
+a *separate* project from the `gettheoffer` production project, which is what C01
+requires. The project id is not a credential; the keys are not in this repository.
+
+```bash
+npm test                              # migrations + policies, locally via PGlite
+npx supabase link --project-ref <ref> # then `npx supabase db push` for the hosted project
+```
+
+Two things the local harness cannot prove, and which must be re-checked on the
+hosted project after any migration:
+
+1. **Default privileges.** A hosted project grants `anon` and `authenticated`
+   EXECUTE on every new function in `public`. Revoking from `PUBLIC` does not undo
+   that. Every function this app defines revokes `anon` by name.
+2. **pgvector.** The vector column and its HNSW index exist only on the hosted
+   project. Run the security advisor after each migration:
+   it caught the `anon` grant above on a schema whose local tests were green.

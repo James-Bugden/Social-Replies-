@@ -461,3 +461,16 @@ create table public.mutation_keys (
   created_at timestamptz not null default now(),
   primary key (user_id, key)
 );
+
+-- ---------------------------------------------------------------------------
+-- Trigger functions are not API. Revoke them explicitly.
+--
+-- Supabase's default privileges grant EXECUTE on new public functions to anon
+-- and authenticated, which would leave these two callable over the REST API.
+-- Trigger firing is unaffected: EXECUTE on a trigger function is checked when
+-- the trigger is created, not each time it runs. A test asserts that no public
+-- function is anon-executable, so this cannot silently regress.
+-- ---------------------------------------------------------------------------
+
+revoke all on function public.set_updated_at() from public, anon, authenticated;
+revoke all on function public.enforce_monotonic_editor_version() from public, anon, authenticated;

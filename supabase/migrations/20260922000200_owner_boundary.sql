@@ -43,6 +43,7 @@ as $$
 $$;
 
 revoke all on function private.is_app_owner() from public;
+revoke all on function private.is_app_owner() from anon;
 
 -- EXECUTE is required because every RLS policy calls this function, and policy
 -- expressions are evaluated with the querying role's privileges. USAGE on the
@@ -70,7 +71,13 @@ as $$
   select private.is_app_owner();
 $$;
 
+-- `revoke ... from public` is NOT enough on a hosted Supabase project: its default
+-- privileges grant EXECUTE on every new function in `public` directly to `anon` and
+-- `authenticated`, and a direct grant survives a revoke from PUBLIC. The hosted
+-- security advisor caught this on a schema whose local tests were already green,
+-- so anon is revoked by name here and in every other function this app defines.
 revoke all on function public.is_app_owner() from public;
+revoke all on function public.is_app_owner() from anon;
 grant execute on function public.is_app_owner() to authenticated;
 
 -- Bootstrapping is a private operation performed against the provisioned project:

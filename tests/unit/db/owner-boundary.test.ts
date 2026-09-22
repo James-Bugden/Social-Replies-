@@ -97,6 +97,21 @@ describe('policy coverage', () => {
     }
   });
 
+  it('leaves no function in public executable by the anonymous role', async () => {
+    // The harness reproduces Supabase's default privileges, which grant EXECUTE on
+    // every new public function to anon. So this is a real check, not a tautology:
+    // a function added without an explicit `revoke ... from anon` fails here.
+    const { rows } = await db.raw.query<{ name: string }>(
+      `select p.proname as name
+       from pg_proc p
+       join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'public'
+         and has_function_privilege('anon', p.oid, 'execute')
+       order by p.proname`,
+    );
+    expect(rows.map((r) => r.name)).toEqual([]);
+  });
+
   it('grants nothing on any table to the anonymous role', async () => {
     const { rows } = await db.raw.query<{ table_name: string; privilege_type: string }>(
       `select table_name, privilege_type from information_schema.role_table_grants

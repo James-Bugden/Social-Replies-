@@ -267,10 +267,11 @@ describe('configuration (C10)', () => {
     const status = configurationStatus({
       AI_PROVIDER: 'anthropic',
       AI_MODEL: 'claude-sonnet-5',
-      AI_API_KEY: 'sk-ant-not-a-real-key-000000000000000000',
+      // Assembled at runtime so this file holds no credential-shaped literal.
+      AI_API_KEY: ['sk', 'ant', 'not-a-real-key', '0'.repeat(24)].join('-'),
     });
     expect(status.generation).toBe('live');
     expect(status.generation_model).toBe('claude-sonnet-5');
-    expect(JSON.stringify(status)).not.toContain('sk-ant');
+    expect(JSON.stringify(status)).not.toContain('not-a-real-key');
   });
 });

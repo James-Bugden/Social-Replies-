@@ -451,12 +451,23 @@ begin
 end;
 $$;
 
--- Only the authenticated owner session may call these. Anonymous callers cannot.
+-- Only the authenticated owner session may call these.
+--
+-- Both revokes are required. A hosted Supabase project's default privileges grant
+-- EXECUTE on new public functions directly to `anon`, and a direct grant is not
+-- removed by revoking from PUBLIC. A test asserts no anon-executable function
+-- remains, so a function added later without this cannot pass unnoticed.
 revoke all on function public.record_reply(uuid, text, uuid, integer, text, text, text, text, timestamptz, jsonb, text) from public;
 revoke all on function public.record_manual_reply(uuid, text, public.platform, text, text, text, public.date_precision, timestamptz, date, text, text, text, text, text, text) from public;
 revoke all on function public.correct_reply(uuid, integer, text, text, text, text, text) from public;
 revoke all on function public.set_reply_withdrawn(uuid, boolean) from public;
 revoke all on function public.daily_counts(text, date) from public;
+
+revoke all on function public.record_reply(uuid, text, uuid, integer, text, text, text, text, timestamptz, jsonb, text) from anon;
+revoke all on function public.record_manual_reply(uuid, text, public.platform, text, text, text, public.date_precision, timestamptz, date, text, text, text, text, text, text) from anon;
+revoke all on function public.correct_reply(uuid, integer, text, text, text, text, text) from anon;
+revoke all on function public.set_reply_withdrawn(uuid, boolean) from anon;
+revoke all on function public.daily_counts(text, date) from anon;
 
 grant execute on function public.record_reply(uuid, text, uuid, integer, text, text, text, text, timestamptz, jsonb, text) to authenticated;
 grant execute on function public.record_manual_reply(uuid, text, public.platform, text, text, text, public.date_precision, timestamptz, date, text, text, text, text, text, text) to authenticated;
