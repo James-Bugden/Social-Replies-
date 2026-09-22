@@ -1,0 +1,52 @@
+{
+  "scope": "Synthetic design prototype only; local Chromium set_content. Clipboard stubbed. Not native clipboard, Orca, backend, AI quality or production verification.",
+  "browser_version": "144.0.7559.96",
+  "results": [
+    {
+      "test": "layout-no-overflow-resource-visible",
+      "width": 375,
+      "passed": true
+    },
+    {
+      "test": "layout-no-overflow-resource-visible",
+      "width": 500,
+      "passed": true
+    },
+    {
+      "test": "layout-no-overflow-resource-visible",
+      "width": 600,
+      "passed": true
+    },
+    {
+      "test": "layout-no-overflow-resource-visible",
+      "width": 750,
+      "passed": true
+    },
+    {
+      "test": "layout-no-overflow-resource-visible",
+      "width": 1280,
+      "passed": true
+    },
+    {
+      "test": "dirty-reply-protected",
+      "passed": true
+    },
+    {
+      "test": "translation-stale-copy-only-text-no-count",
+      "passed": true
+    },
+    {
+      "test": "save-failure-retains-text-double-record-once",
+      "passed": true
+    },
+    {
+      "test": "no-resource-distinct-from-error",
+      "passed": true
+    },
+    {
+      "test": "direction-C-hides-resources-B-does-not",
+      "passed": true
+    }
+  ],
+  "page_errors": []
+}
