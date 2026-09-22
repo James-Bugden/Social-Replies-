@@ -7,7 +7,7 @@ import { SourceInput } from './SourceInput';
 import { PastRepliesSection } from './PastRepliesSection';
 import { ResourcesSection } from './ResourcesSection';
 import { IdeasSection } from './IdeasSection';
-import { FinalReplyEditor } from './FinalReplyEditor';
+import { FinalReplyEditor, FINAL_EDITOR_ID } from './FinalReplyEditor';
 import { ActionStrip } from './ActionStrip';
 import { AddPastReplyDialog } from './AddPastReplyDialog';
 import { Button } from './primitives';
@@ -402,7 +402,7 @@ export function Workspace({
         draft={state.draft}
         save={state.save}
         editedSinceCopy={isEditedSinceCopy(state, draftHash)}
-        selectTargetId="your-reply"
+        selectTargetId={FINAL_EDITOR_ID}
         onCopied={() => dispatch({ type: 'copied', hash: draftHash })}
         onMarkPosted={onMarkPosted}
         onUndoRecorded={() => undefined}

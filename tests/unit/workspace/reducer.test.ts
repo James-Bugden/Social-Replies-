@@ -314,6 +314,38 @@ describe('resource insertion preserves human text (RES-04)', () => {
     expect(next.draft).toBe(`My reply.${inserted}`);
   });
 
+  it('replaces cleanly when the previous block is untouched', () => {
+    const next = run(withResource(), {
+      type: 'insert_resource',
+      resource: resource({ id: '44444444-4444-4444-8444-000000000004' }),
+      insertedText: '\n\nAnother link.',
+      hash: 'h',
+    });
+
+    // Exactly one resource block in the proposal, not two.
+    expect(next.proposal?.text).toBe('My reply.\n\nAnother link.');
+  });
+
+  it('appends rather than deleting an edited block, and shows the result first', () => {
+    const edited = run(withResource(), {
+      type: 'edit_draft',
+      value: 'My reply.\n\nI wrote something on this, have a look.',
+      hash: 'h2',
+    });
+    const next = run(edited, {
+      type: 'insert_resource',
+      resource: resource({ id: '44444444-4444-4444-8444-000000000004' }),
+      insertedText: '\n\nAnother link.',
+      hash: 'h2',
+    });
+
+    // The owner's edited words survive, and the outcome is visible before it
+    // happens rather than applied silently.
+    expect(next.draft).toBe('My reply.\n\nI wrote something on this, have a look.');
+    expect(next.proposal?.text).toContain('have a look.');
+    expect(next.proposal?.text).toContain('Another link.');
+  });
+
   it('removes an untouched inserted block exactly', () => {
     const next = run(withResource(), { type: 'remove_resource', hash: 'h' });
 

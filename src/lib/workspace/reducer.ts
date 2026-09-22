@@ -335,14 +335,19 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
         return state;
       }
       if (state.insertedResource) {
-        // A different resource previews a replacement rather than accumulating links.
+        // A different resource previews a replacement rather than accumulating
+        // links. If the owner has edited the previous block it can no longer be
+        // removed exactly, so the preview appends instead and shows them the
+        // result: two links they chose beats one edit silently deleted.
+        const previous = state.insertedResource.insertedText;
+        const withoutPrevious = state.draft.includes(previous)
+          ? state.draft.replace(previous, '').trimEnd()
+          : state.draft;
+
         return {
           ...state,
           proposal: {
-            text: state.draft
-              .replace(state.insertedResource.insertedText, '')
-              .trimEnd()
-              .concat(action.insertedText),
+            text: withoutPrevious.concat(action.insertedText),
             baseEditorVersion: state.editorVersion,
             origin: 'refine',
             ideaId: null,

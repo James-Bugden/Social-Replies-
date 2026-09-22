@@ -247,3 +247,45 @@ test.describe('honest states', () => {
     }
   });
 });
+
+test.describe('when the clipboard refuses (COPY-01)', () => {
+  test('selects the reply text and never claims success', async ({ page }) => {
+    await page.goto('/');
+    // Make writeText reject before anything runs, so the denied path is real
+    // rather than simulated at the component boundary.
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: () => Promise.reject(new Error('denied')) },
+      });
+    });
+    await page.reload();
+
+    await page.getByRole('textbox', { name: /Paste the post or comment/ }).fill(SOURCE_POST);
+    await page.getByRole('button', { name: 'Get reply ideas' }).click();
+
+    const editor = page.getByRole('textbox', { name: 'Your reply' });
+    await editor.fill('The exact text that must end up selected.');
+
+    const before = await page.getByText(/^LinkedIn \d+\/\d+$/).textContent();
+
+    await page.getByRole('button', { name: 'Copy reply' }).click();
+
+    await expect(
+      page.getByText("Couldn't copy automatically. Select the text and copy it."),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Copied' })).toHaveCount(0);
+
+    // The editor holds the selection, so Ctrl+C works, and it is the reply text
+    // rather than the surrounding interface.
+    const selection = await page.evaluate(() => {
+      const element = document.getElementById('final-reply-editor');
+      if (!(element instanceof HTMLTextAreaElement)) return null;
+      return element.value.slice(element.selectionStart, element.selectionEnd);
+    });
+    expect(selection).toBe('The exact text that must end up selected.');
+
+    // A failed copy is not a post, so the count has not moved.
+    await expect(page.getByText(before ?? '')).toBeVisible();
+  });
+});
