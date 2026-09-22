@@ -14,6 +14,7 @@ import { Button } from './primitives';
 import { EDITOR, MANUAL } from '@/lib/workspace/copy';
 import { initialState, isEditedSinceCopy, workspaceReducer } from '@/lib/workspace/reducer';
 import { api, ApiError, newOperationKey } from '@/lib/workspace/client';
+import { forgetDraft, recallDraft, rememberDraft } from '@/lib/workspace/recovery';
 import { contentHash } from '@/lib/contracts/text';
 import type { Platform } from '@/lib/contracts/vocabulary';
 import type { Progress, QualifiedResource, ReplyIdea } from '@/lib/contracts/api';
@@ -51,7 +52,7 @@ export function Workspace({
   const router = useRouter();
 
   const generationAbort = useRef<AbortController | null>(null);
-  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSyncedDraft = useRef<string>('');
   const operationKey = useRef<string | null>(null);
   const manualTrigger = useRef<HTMLButtonElement>(null);
 
@@ -60,6 +61,60 @@ export function Workspace({
   useEffect(() => {
     if (initialProgress) dispatch({ type: 'progress_refreshed', progress: initialProgress });
   }, [initialProgress]);
+
+  /**
+   * Put the reply back after a trip to a utility page.
+   *
+   * This component unmounts on navigation, so without this, opening Resources to
+   * add the very link the owner wanted discarded what they had written. Runs once,
+   * before anything else can change the draft.
+   */
+  useEffect(() => {
+    const recovered = recallDraft();
+    if (!recovered) return;
+    dispatch({
+      type: 'restore_draft',
+      sessionId: recovered.sessionId,
+      platform: recovered.platform,
+      targetKind: recovered.targetKind,
+      sourceText: recovered.sourceText,
+      parentText: recovered.parentText,
+      sourceUrl: recovered.sourceUrl,
+      draft: recovered.draft,
+      editorVersion: recovered.editorVersion,
+      sourceVersion: recovered.sourceVersion,
+      contextVersion: recovered.contextVersion,
+    });
+    lastSyncedDraft.current = recovered.draft;
+  }, []);
+
+  // Kept current so a navigation at any moment has something to come back to.
+  useEffect(() => {
+    if (!state.sessionId) return;
+    rememberDraft({
+      sessionId: state.sessionId,
+      platform: state.platform,
+      targetKind: state.targetKind,
+      sourceText: state.sourceText,
+      parentText: state.parentText,
+      sourceUrl: state.sourceUrl,
+      draft: state.draft,
+      editorVersion: state.editorVersion,
+      sourceVersion: state.sourceVersion,
+      contextVersion: state.contextVersion,
+    });
+  }, [
+    state.sessionId,
+    state.platform,
+    state.targetKind,
+    state.sourceText,
+    state.parentText,
+    state.sourceUrl,
+    state.draft,
+    state.editorVersion,
+    state.sourceVersion,
+    state.contextVersion,
+  ]);
 
   // The local day rolls over at Taipei midnight and the window may have been in the
   // background for hours, so the count is refetched on focus rather than trusted.
@@ -169,30 +224,47 @@ export function Workspace({
     }
   }, [state.platform, state.targetKind, state.sourceText, state.parentText, state.sourceUrl, runGeneration]);
 
-  const onDraftChange = useCallback(
-    (value: string) => {
-      dispatch({ type: 'edit_draft', value, hash: contentHash(value) });
+  const onDraftChange = useCallback((value: string) => {
+    dispatch({ type: 'edit_draft', value, hash: contentHash(value) });
+  }, []);
 
-      if (draftTimer.current) clearTimeout(draftTimer.current);
-      if (!state.sessionId) return;
-      const sessionId = state.sessionId;
+  /**
+   * Keeps the server draft level with the editor, whatever moved it.
+   *
+   * This used to hang off the textarea's onChange, which meant the server only
+   * ever saw text the owner had *typed*. Using an idea, accepting a rewrite,
+   * inserting a resource and Undo all change the draft without a keystroke, so
+   * the server kept an older version, and everything that reads it worked on
+   * text the owner was no longer looking at: Shorter and Warmer were dead until
+   * the first keystroke, and a second rewrite was computed from the draft the
+   * owner had already replaced.
+   *
+   * Watching the draft itself catches every one of those paths, including any
+   * added later.
+   */
+  useEffect(() => {
+    if (!state.sessionId) return;
+    if (state.draft === lastSyncedDraft.current) return;
 
-      draftTimer.current = setTimeout(() => {
-        api
-          .saveDraft({
-            session_id: sessionId,
-            expected_editor_version: state.editorVersion,
-            draft_text: value,
-          })
-          .then((result) => dispatch({ type: 'draft_saved_to_server', editorVersion: result.editor_version }))
-          .catch(() => {
-            // A failed debounced save is not shown. The text is still on screen and
-            // "Draft saved" is never claimed for text that only exists in memory.
-          });
-      }, 800);
-    },
-    [state.sessionId, state.editorVersion],
-  );
+    const sessionId = state.sessionId;
+    const value = state.draft;
+    const version = state.editorVersion;
+
+    const timer = setTimeout(() => {
+      api
+        .saveDraft({ session_id: sessionId, expected_editor_version: version, draft_text: value })
+        .then((result) => {
+          lastSyncedDraft.current = value;
+          dispatch({ type: 'draft_saved_to_server', editorVersion: result.editor_version });
+        })
+        .catch(() => {
+          // Never shown. The text is on screen, and "Draft saved" is not claimed
+          // for text that only exists in memory (D12).
+        });
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [state.draft, state.sessionId, state.editorVersion]);
 
   const onRefine = useCallback(
     async (action: 'shorter' | 'more_direct' | 'warmer' | 'add_personal_example') => {
@@ -235,11 +307,13 @@ export function Workspace({
         text_hash: hashAtRequest,
         request_key: newOperationKey(),
       });
+      // No currentHash is passed: this handler closed over the draft when the
+      // owner clicked, so anything it computes describes the old text. The
+      // reducer compares against the live draft instead.
       dispatch({
         type: 'meaning_received',
         text: result.english_meaning,
         sourceHash: result.source_hash,
-        currentHash: contentHash(state.draft),
       });
     } catch {
       dispatch({ type: 'meaning_failed' });
@@ -278,6 +352,27 @@ export function Workspace({
   }, [state.sessionId, state.editorVersion, state.draft, state.insertedResource]);
 
   const onUseIdea = useCallback((idea: ReplyIdea) => dispatch({ type: 'use_idea', idea }), []);
+
+  /**
+   * Undo recorded status.
+   *
+   * This was a no-op for a while, which is the worst thing a control like this
+   * can be: the owner presses it believing they have reversed a recording, the
+   * count does not move, and the reply stays eligible as voice evidence. It
+   * withdraws this app's record only; the reply on the social platform is
+   * untouched and the copy says so.
+   */
+  const onUndoRecorded = useCallback(async () => {
+    if (state.save.status !== 'saved') return;
+    const replyId = state.save.replyId;
+    try {
+      await api.libraryPatch(replyId, { action: 'withdraw', withdrawn: true });
+      const progress = await api.progress();
+      dispatch({ type: 'undo_recorded', progress });
+    } catch {
+      dispatch({ type: 'undo_recorded_failed' });
+    }
+  }, [state.save]);
 
   const loadMoreHistory = useCallback(async () => {
     if (!state.history.nextCursor) return;
@@ -405,8 +500,14 @@ export function Workspace({
         selectTargetId={FINAL_EDITOR_ID}
         onCopied={() => dispatch({ type: 'copied', hash: draftHash })}
         onMarkPosted={onMarkPosted}
-        onUndoRecorded={() => undefined}
-        onNextReply={() => dispatch({ type: 'next_reply' })}
+        onUndoRecorded={onUndoRecorded}
+        onNextReply={() => {
+          // Recorded, and the owner has moved on, so the local copy has nothing
+          // left to protect.
+          forgetDraft();
+          lastSyncedDraft.current = '';
+          dispatch({ type: 'next_reply' });
+        }}
       />
 
       {showManual ? (

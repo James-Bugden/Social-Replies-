@@ -69,20 +69,46 @@ export function assertSameOrigin(request: NextRequest): void {
 
   const origin = request.headers.get('origin');
   if (!origin) {
+    // A browser always sends Origin on a cross-site request, so its absence means
+    // the caller is not a browser. This app has no non-browser callers.
     throw new AppError('forbidden', 'That is not available.');
   }
 
-  let originHost: string;
+  let sent: URL;
   try {
-    originHost = new URL(origin).host;
+    sent = new URL(origin);
   } catch {
+    // Includes the literal "null" a sandboxed frame sends.
     throw new AppError('forbidden', 'That is not available.');
   }
 
-  const expected = request.headers.get('host') ?? new URL(request.url).host;
-  if (originHost !== expected) {
+  // Compare origins, not hosts. Host alone treats http://app and https://app as
+  // the same place, which is the one difference that matters when someone can
+  // answer for that host over plain http.
+  //
+  // The expected origin comes from the request itself rather than from
+  // APP_BASE_URL. Configuration would be one more thing that has to be right, and
+  // getting it wrong on a preview deployment would reject every mutation with a
+  // message that says nothing about why.
+  const host = request.headers.get('host') ?? new URL(request.url).host;
+  const expected = `${forwardedProtocol(request)}//${host}`;
+
+  if (sent.origin !== expected) {
     throw new AppError('forbidden', 'That is not available.');
   }
+}
+
+/**
+ * The scheme the browser actually used.
+ *
+ * A proxy terminates TLS, so the request this code sees may be plain http even
+ * though the owner is on https. `x-forwarded-proto` is what the proxy sets; the
+ * request's own protocol is the fallback for running without one.
+ */
+function forwardedProtocol(request: NextRequest): string {
+  const forwarded = request.headers.get('x-forwarded-proto');
+  if (forwarded) return `${forwarded.split(',')[0]!.trim()}:`;
+  return new URL(request.url).protocol;
 }
 
 /**

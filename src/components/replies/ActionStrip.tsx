@@ -113,6 +113,9 @@ export function ActionStrip(props: ActionStripProps) {
               props.save.progress.targets[props.platform],
             )}
           </StatusLine>
+          {props.save.status === 'saved' && props.save.undoFailed ? (
+            <StatusLine tone="error">{RECORD.undoFailed}</StatusLine>
+          ) : null}
           <div className="mt-2 flex flex-wrap gap-2">
             <Button onClick={props.onUndoRecorded}>{RECORD.undoRecorded}</Button>
             <Button variant="primary" size="primary" onClick={props.onNextReply}>

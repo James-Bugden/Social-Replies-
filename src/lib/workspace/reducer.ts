@@ -1,3 +1,4 @@
+import { contentHash } from '@/lib/contracts/text';
 import type { Platform, SectionState, TargetKind } from '@/lib/contracts/vocabulary';
 import type { PastReply, QualifiedResource, ReplyIdea, Progress } from '@/lib/contracts/api';
 
@@ -48,7 +49,7 @@ export type SaveState =
   | { status: 'idle' }
   | { status: 'saving' }
   | { status: 'failed'; canRetry: true }
-  | { status: 'saved'; replyId: string; progress: Progress };
+  | { status: 'saved'; replyId: string; progress: Progress; undoFailed?: boolean };
 
 export interface ProposalState {
   /** What would replace the editor if the owner accepts. */
@@ -98,6 +99,8 @@ export interface WorkspaceState {
   ideas: IdeasState;
   proposal: ProposalState | null;
   insertedResource: InsertedResource | null;
+  /** What `insertedResource` becomes if the pending proposal is accepted. */
+  pendingResource: InsertedResource | null;
   meaning: MeaningState;
 
   copiedHash: string | null;
@@ -144,7 +147,7 @@ export type WorkspaceAction =
   | { type: 'insert_resource'; resource: QualifiedResource; insertedText: string; hash: string }
   | { type: 'remove_resource'; hash: string }
   | { type: 'meaning_requested' }
-  | { type: 'meaning_received'; text: string; sourceHash: string; currentHash: string }
+  | { type: 'meaning_received'; text: string; sourceHash: string }
   | { type: 'meaning_failed' }
   | { type: 'copied'; hash: string }
   | { type: 'copy_failed' }
@@ -153,6 +156,21 @@ export type WorkspaceAction =
   | { type: 'save_failed' }
   | { type: 'undo' }
   | { type: 'next_reply' }
+  | {
+      type: 'restore_draft';
+      sessionId: string;
+      platform: Platform;
+      targetKind: TargetKind;
+      sourceText: string;
+      parentText: string;
+      sourceUrl: string;
+      draft: string;
+      editorVersion: number;
+      sourceVersion: number;
+      contextVersion: number;
+    }
+  | { type: 'undo_recorded'; progress: Progress }
+  | { type: 'undo_recorded_failed' }
   | { type: 'progress_refreshed'; progress: Progress };
 
 export function initialState(platform: Platform = 'linkedin'): WorkspaceState {
@@ -174,6 +192,7 @@ export function initialState(platform: Platform = 'linkedin'): WorkspaceState {
     ideas: { status: 'idle' },
     proposal: null,
     insertedResource: null,
+    pendingResource: null,
     meaning: { text: null, sourceHash: null, status: 'idle' },
     copiedHash: null,
     save: { status: 'idle' },
@@ -321,13 +340,17 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
         previousDraft: state.draft,
         dirty: true,
         proposal: null,
+        // A proposal that swapped the attached resource carries the new one.
+        ...(state.pendingResource ? { insertedResource: state.pendingResource } : {}),
+        pendingResource: null,
         meaning: invalidateMeaning(state.meaning),
       };
     }
 
     case 'reject_proposal':
-      // Keep my reply preserves the exact text, byte for byte.
-      return { ...state, proposal: null };
+      // Keep my reply preserves the exact text, byte for byte, and the resource
+      // that would have been swapped in is forgotten along with the proposal.
+      return { ...state, proposal: null, pendingResource: null };
 
     case 'insert_resource': {
       if (state.insertedResource?.resourceId === action.resource.id) {
@@ -346,6 +369,16 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
 
         return {
           ...state,
+          // The proposal carries which resource it would attach, so accepting it
+          // updates the record of what is in the text. Without this the session
+          // still claimed the *previous* resource: the reply got recorded with a
+          // snapshot naming a link that was no longer in it, and Remove resource
+          // became a no-op because it searched for text that had been replaced.
+          pendingResource: {
+            resourceId: action.resource.id,
+            version: action.resource.version,
+            insertedText: action.insertedText,
+          },
           proposal: {
             text: withoutPrevious.concat(action.insertedText),
             baseEditorVersion: state.editorVersion,
@@ -397,16 +430,25 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case 'meaning_requested':
       return { ...state, meaning: { ...state.meaning, status: 'loading' } };
 
-    case 'meaning_received':
-      // A translation of text that has since changed is discarded, never shown
-      // against the newer Chinese.
-      if (action.sourceHash !== action.currentHash) {
+    case 'meaning_received': {
+      // The comparison is made against the draft *now*, read from state, not
+      // against a hash the caller passes in.
+      //
+      // The caller is an async handler that closed over the draft when the owner
+      // clicked, so anything it computes describes the text at click time. Asking
+      // it "is this still current?" always answered yes, which made this guard
+      // look present and do nothing: the English of the old Chinese was shown as
+      // current, on the one screen whose job is checking what is about to be
+      // posted. The reducer holds the live draft, so it is the only thing that
+      // can answer honestly.
+      if (action.sourceHash !== contentHash(state.draft)) {
         return { ...state, meaning: { ...state.meaning, status: 'stale' } };
       }
       return {
         ...state,
         meaning: { text: action.text, sourceHash: action.sourceHash, status: 'ready' },
       };
+    }
 
     case 'meaning_failed':
       // Translation failure never blocks copying or saving.
@@ -450,6 +492,42 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       const fresh = initialState(state.platform);
       return { ...fresh, progress: state.progress };
     }
+
+    case 'restore_draft':
+      // Coming back from a utility page. The text is restored exactly, and the
+      // editor is marked dirty because it is: these are words the owner wrote.
+      // Retrieval and ideas are deliberately not restored, because they belong to
+      // a request that is over; the owner can ask again, and showing stale
+      // results as current would be the same lie this app exists to avoid.
+      return {
+        ...state,
+        sessionId: action.sessionId,
+        platform: action.platform,
+        targetKind: action.targetKind,
+        sourceText: action.sourceText,
+        parentText: action.parentText,
+        sourceUrl: action.sourceUrl,
+        draft: action.draft,
+        dirty: action.draft !== '',
+        editorVersion: action.editorVersion,
+        sourceVersion: action.sourceVersion,
+        contextVersion: action.contextVersion,
+      };
+
+    case 'undo_recorded':
+      // The app's record is withdrawn and the count follows. The reply on the
+      // social platform is untouched, which is why the session goes back to a
+      // plain draft rather than to some "unposted" state that implies otherwise.
+      return {
+        ...state,
+        save: { status: 'idle' },
+        progress: action.progress,
+      };
+
+    case 'undo_recorded_failed':
+      // Nothing changed, so the recorded state stands. Saying so beats leaving a
+      // button that looks like it worked.
+      return { ...state, save: { ...state.save, undoFailed: true } as SaveState };
 
     case 'progress_refreshed':
       return { ...state, progress: action.progress };

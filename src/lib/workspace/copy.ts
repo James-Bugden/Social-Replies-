@@ -118,6 +118,8 @@ export const RECORD = {
   saved: (platform: string, count: number, target: number) =>
     `Saved. ${platform} ${count}/${target} today.`,
   undoRecorded: 'Undo recorded status',
+  undoFailed: "Couldn't undo that. It is still recorded.",
+  undoneHelper: 'Undone here. The reply is still on the platform if you posted it.',
   next: 'Next reply',
   signedOut: 'Sign in to save your reply.',
 } as const;

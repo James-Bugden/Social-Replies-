@@ -194,6 +194,19 @@ test.describe('layout', () => {
 
 test.describe('keyboard and input method', () => {
   test('Ctrl+Enter submits, but a composition commit does not', async ({ page }) => {
+    // Count the requests rather than looking for their effects.
+    //
+    // The previous version waited for the "Reply ideas" heading, which is
+    // rendered unconditionally at page load, so it was not a synchronisation
+    // point at all: the negative assertion that followed passed on its first
+    // poll, before any request it was meant to forbid could have returned. A
+    // request counter cannot pass early, because the number is zero or it is not.
+    let analyseCalls = 0;
+    await page.route('**/api/reply/analyse', async (route) => {
+      analyseCalls += 1;
+      await route.continue();
+    });
+
     await page.goto('/');
     const source = page.getByRole('textbox', { name: /Paste the post or comment/ });
     await source.fill(SOURCE_POST);
@@ -205,11 +218,15 @@ test.describe('keyboard and input method', () => {
         new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, isComposing: true, bubbles: true }),
       );
     });
-    await expect(page.getByRole('heading', { name: 'Reply ideas' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Use this', exact: true })).toHaveCount(0);
+
+    // Long enough that a request triggered by that keystroke would have been
+    // counted by now.
+    await page.waitForTimeout(750);
+    expect(analyseCalls, 'a composition commit asked for ideas').toBe(0);
 
     await source.press('Control+Enter');
     await expect(page.getByRole('button', { name: 'Use this', exact: true })).toHaveCount(3);
+    expect(analyseCalls).toBe(1);
   });
 
   test('empty input asks for the post rather than searching for nothing', async ({ page }) => {
@@ -243,21 +260,36 @@ test.describe('honest states', () => {
   });
 
   test('never presents an AI draft as something the owner posted', async ({ page }) => {
+    // Every assertion here runs unconditionally.
+    //
+    // The previous version put its single expect inside two nested ifs whose
+    // inner condition could not be true, so it executed nothing and passed for
+    // the wrong reason. Worse, the heading it meant to forbid was present in the
+    // state it was checking.
     await page.goto('/');
     await analyse(page, 'example ai draft that was never posted');
 
-    // The seed corpus contains an AI draft with exactly this text. It is excluded
-    // from voice evidence, so the confirmed heading must not appear for it.
-    const confirmedHeading = page.getByRole('heading', {
-      name: "You've replied to similar posts before",
-    });
-    const rows = page.getByRole('listitem');
-    if ((await rows.count()) > 0) {
-      const text = await rows.allTextContents();
-      if (text.join(' ').includes('AI draft')) {
-        await expect(confirmedHeading).toHaveCount(0);
-      }
-    }
+    // The seed corpus holds an AI draft containing exactly this phrase. Voice
+    // evidence excludes it, so it must not appear in the workspace at all.
+    const history = page.locator('section', { has: page.getByRole('heading', { level: 2 }) });
+    await expect(page.getByText('Example AI draft that was never posted')).toHaveCount(0);
+
+    // And it must never be labelled as something that was posted.
+    await expect(history.getByText('AI draft')).toHaveCount(0);
+
+    // It is still the owner's own writing, so the library finds it, labelled
+    // honestly rather than hidden or dressed up as a reply.
+    await page.goto('/library');
+    await page
+      .getByRole('textbox', { name: /Search/ })
+      .first()
+      .fill('example ai draft that was never posted');
+    await page.getByRole('button', { name: /Search/ }).first().click();
+
+    const row = page.locator('li').filter({ hasText: 'Example AI draft that was never posted' });
+    await expect(row).toBeVisible();
+    await expect(row.getByText('AI draft')).toBeVisible();
+    await expect(row.getByText('Posted', { exact: true })).toHaveCount(0);
   });
 });
 
