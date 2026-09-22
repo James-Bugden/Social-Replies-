@@ -69,12 +69,16 @@ export const POST = ownerRoute(async (request, { session }) => {
   });
 
   if (outcome.status !== 'ok') {
+    // The generator's reason is carried through rather than flattened. "Could not
+    // be read" and "was read and was not safe" are different problems, and a reader
+    // of a request log should be able to tell them apart.
     const code =
       outcome.failure?.code === 'rate_limited'
         ? 'rate_limited'
         : outcome.failure?.code === 'provider_timeout'
           ? 'provider_timeout'
-          : outcome.failure?.code === 'withheld_unsafe'
+          : outcome.failure?.code === 'withheld_unsafe' ||
+              outcome.failure?.code === 'provider_invalid_response'
             ? 'provider_invalid_response'
             : 'provider_unavailable';
     throw new AppError(code, 'Could not create reply ideas. Your draft is unchanged.', {

@@ -89,6 +89,10 @@ export async function generateIdeas(
   let attempts = 0;
   let lastWarnings: string[] = [];
   let repairHint: string | null = null;
+  // Why the last attempt was rejected, so the outcome can say the true reason.
+  // Reporting "did not pass the grounding checks" after a JSON parse failure
+  // would send whoever reads it looking at the wrong thing.
+  let lastRejection: 'unreadable' | 'unsafe' | null = null;
   let usage: GenerateOutcome['usage'] = { inputTokens: null, outputTokens: null, durationMs: 0 };
 
   const base = {
@@ -174,6 +178,7 @@ export async function generateIdeas(
 
     const parsed = parseProviderOutput(attemptResult.rawText);
     if (!parsed.ok) {
+      lastRejection = 'unreadable';
       repairHint = `The previous response could not be read: ${parsed.detail}. Return JSON only.`;
       continue;
     }
@@ -192,12 +197,14 @@ export async function generateIdeas(
       };
     }
 
+    lastRejection = 'unsafe';
     repairHint = report.repairHint;
   }
 
-  // The repair budget is spent and the result is still unsafe. Showing it anyway
-  // would be the one failure the owner cannot detect by reading, so it is withheld
-  // and retrieval plus the manual editor carry the workflow.
+  // The repair budget is spent. Either the response could not be read at all, or
+  // it could be read and was not safe to show. Showing an unsafe one anyway would
+  // be the single failure the owner cannot catch by reading, so both outcomes
+  // withhold the ideas and leave retrieval and the manual editor carrying the work.
   return {
     ...base,
     status: 'withheld',
@@ -205,9 +212,15 @@ export async function generateIdeas(
     warnings: lastWarnings,
     usage,
     attempts,
-    failure: {
-      code: 'withheld_unsafe',
-      detail: 'The suggestions did not pass the grounding checks and were not shown.',
-    },
+    failure:
+      lastRejection === 'unreadable'
+        ? {
+            code: 'provider_invalid_response',
+            detail: 'The provider did not return a readable response.',
+          }
+        : {
+            code: 'withheld_unsafe',
+            detail: 'The suggestions did not pass the grounding checks and were not shown.',
+          },
   };
 }
