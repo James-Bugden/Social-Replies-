@@ -4,17 +4,11 @@ import { getStore } from '@/lib/server/get-store';
 import { AppError } from '@/lib/contracts/errors';
 import { refineRequestSchema, type RefineResponse } from '@/lib/contracts/api';
 import { createGenerator } from '@/lib/ai';
+import { assembleRewriteInstruction, checkRewrite, parseRewriteOutput } from '@/lib/ai/tasks';
+import { needsEnglishMeaning } from '@/lib/contracts/vocabulary';
 import { GENERATION } from '@/lib/contracts/limits';
 
 export const dynamic = 'force-dynamic';
-
-const INSTRUCTIONS: Record<string, string> = {
-  shorter: 'Make it shorter without losing the useful point. Do not add anything new.',
-  more_direct: 'Make it more direct. Remove hedging. Do not make it blunt or rude.',
-  warmer: 'Make it warmer. Do not add flattery, and do not add an opening compliment.',
-  add_personal_example:
-    'Add a first-person example ONLY if one of the supplied approved facts supports it, saying no more than that fact says. If none fits, return the text unchanged.',
-};
 
 /**
  * POST /api/reply/refine (D08).
@@ -25,6 +19,14 @@ const INSTRUCTIONS: Record<string, string> = {
  *
  * `base_editor_version` travels back with the proposal so the client can tell
  * whether it is still about the text on screen.
+ *
+ * A proposal sits one click from the editor, so it carries the authority of a
+ * generated idea and is held to the same checks. This route used to return the
+ * provider's raw text, which meant a rewrite could carry a link, a figure nobody
+ * supplied, or a claim about the owner's career that no approved fact supports, and
+ * one press of Apply rewrite would copy it in byte for byte. A rewrite that fails
+ * the checks is not offered at all: the owner's own reply is already on screen and
+ * is the safe thing to keep.
  */
 export const POST = ownerRoute(async (request, { session }) => {
   const body = await readJson(request, refineRequestSchema);
@@ -45,30 +47,40 @@ export const POST = ownerRoute(async (request, { session }) => {
   }
 
   const context = await store.generationContext(body.session_id, []);
+  const requireEnglishMeaning = needsEnglishMeaning(context.platform);
+  // A rewrite is never asked to build on a cited past reply, so the seed list the
+  // guards read is empty rather than carried over from a generation run.
+  const guardContext = { ...context, seedReplyIds: [] };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GENERATION.attemptDeadlineMs);
   try {
     const attempt = await generator.complete(
-      [
-        "You revise one social reply on its author's behalf.",
-        INSTRUCTIONS[body.action] ?? INSTRUCTIONS.shorter,
-        'Return only the revised reply text, with no commentary and no link.',
-        context.facts.length > 0
-          ? `Approved facts you may draw on:\n${context.facts.map((f) => `- ${f.text}`).join('\n')}`
-          : 'There are no approved facts, so do not add a personal story.',
-      ].join('\n\n'),
+      assembleRewriteInstruction(body.action, context.facts, { requireEnglishMeaning }),
       replySession.draft_text,
-      { signal: controller.signal, maxOutputTokens: GENERATION.outputTokenBudget },
+      { signal: controller.signal, maxOutputTokens: GENERATION.outputTokenBudget, task: 'rewrite' },
     );
 
-    const proposed = attempt.rawText.trim();
-    if (proposed === '') throw new AppError('provider_invalid_response', 'Could not rewrite that.');
+    const parsed = parseRewriteOutput(attempt.rawText);
+    if (!parsed.ok) {
+      throw new AppError('provider_invalid_response', 'Could not rewrite that. Your reply is unchanged.');
+    }
+
+    const report = checkRewrite(parsed.value, body.action, guardContext, replySession.draft_text);
+    if (report.hardFailures.length > 0) {
+      // No repair attempt, deliberately. A rewrite costs nothing to skip, and a
+      // second call to fix the first one is how a button the owner can press on
+      // every draft turns into an unbounded bill.
+      throw new AppError(
+        'withheld_unsafe',
+        'That rewrite did not pass the grounding checks, so it is not being offered. Your reply is unchanged.',
+      );
+    }
 
     const response: RefineResponse = {
-      proposed_text: proposed,
+      proposed_text: parsed.value.revised_text.trim(),
       base_editor_version: replySession.editor_version,
-      english_meaning: null,
+      english_meaning: parsed.value.english_meaning,
     };
     return jsonResponse(response);
   } finally {

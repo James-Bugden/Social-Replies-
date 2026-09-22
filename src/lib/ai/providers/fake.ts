@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { MEANING_REQUIRED_LINE } from '../tasks';
 import { ProviderError, type GenerationAttempt, type ReplyGenerator } from '../types';
 
 /**
@@ -11,6 +12,12 @@ import { ProviderError, type GenerationAttempt, type ReplyGenerator } from '../t
  *
  * It is labelled. Every reply it produces says it is an example, because a fake
  * that is indistinguishable from real output is how a demo becomes a false claim.
+ *
+ * It answers the question it was asked. Emitting the ideas payload for every task
+ * meant a rewrite request was answered with a JSON blob, and the owner was offered
+ * it as a revision of their reply; the English meaning of a Chinese draft was the
+ * same blob, saved to the session as what their Chinese says. Each task therefore
+ * has its own stand-in, in the shape that task declares.
  */
 
 export interface FakeBehaviour {
@@ -68,6 +75,24 @@ const CHINESE_SHAPES = [
   },
 ];
 
+/**
+ * Stand-ins for the single-answer tasks.
+ *
+ * Deliberately fixed rather than derived from the draft. Echoing the owner's own
+ * sentences back at them would read like a real revision, and a stand-in that reads
+ * like a real revision is the thing this provider exists not to be.
+ */
+const REWRITE_EXAMPLE = {
+  english:
+    'Example rewrite. This is a stand-in from the fake provider. It shows the shape of a revision rather than being one.',
+  chinese: '範例改寫。這是假提供者產生的佔位文字，只用來讓你看見改寫的格式。',
+  chineseMeaning:
+    'Example rewrite. This is placeholder text from the fake provider, shown only so you can see the shape of a revision.',
+} as const;
+
+const TRANSLATION_EXAMPLE =
+  'Example meaning. The fake provider does not read the draft, so this stands in for the English rather than describing what was written.';
+
 /** A short, stable stand-in for the subject of the source post. */
 function topicOf(userContent: string): string {
   const words = userContent
@@ -113,6 +138,33 @@ export function createFakeGenerator(behaviour: FakeBehaviour = {}): ReplyGenerat
         };
       }
 
+      const finish = (payload: unknown): GenerationAttempt => ({
+        rawText: JSON.stringify(payload),
+        usage: {
+          // Deterministic, so a test can assert on usage without a live call.
+          inputTokens: Math.min(6_000, Math.ceil(userContent.length / 4)),
+          outputTokens: Math.ceil(JSON.stringify(payload).length / 4),
+          durationMs: Date.now() - started,
+        },
+        model: 'fake',
+        provider: 'fake',
+      });
+
+      if (options.task === 'translation') {
+        return finish({ english_meaning: TRANSLATION_EXAMPLE });
+      }
+
+      if (options.task === 'rewrite') {
+        const needsMeaning = instruction.includes(MEANING_REQUIRED_LINE);
+        return finish({
+          revised_text: needsMeaning ? REWRITE_EXAMPLE.chinese : REWRITE_EXAMPLE.english,
+          english_meaning: needsMeaning ? REWRITE_EXAMPLE.chineseMeaning : null,
+          // No approved fact is ever leaned on, so the stand-in stays groundable
+          // whatever context it is asked to revise in.
+          uses_fact_ids: [],
+        });
+      }
+
       const wantsChinese = instruction.includes('Taiwan Traditional Chinese');
       const topic = topicOf(userContent);
       const shapes = wantsChinese ? CHINESE_SHAPES : ENGLISH_SHAPES;
@@ -133,17 +185,7 @@ export function createFakeGenerator(behaviour: FakeBehaviour = {}): ReplyGenerat
         };
       });
 
-      return {
-        rawText: JSON.stringify({ ideas }),
-        usage: {
-          // Deterministic, so a test can assert on usage without a live call.
-          inputTokens: Math.min(6_000, Math.ceil(userContent.length / 4)),
-          outputTokens: Math.ceil(JSON.stringify(ideas).length / 4),
-          durationMs: Date.now() - started,
-        },
-        model: 'fake',
-        provider: 'fake',
-      };
+      return finish({ ideas });
     },
   };
 }

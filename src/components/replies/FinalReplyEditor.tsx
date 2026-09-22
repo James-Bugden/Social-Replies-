@@ -27,6 +27,8 @@ export interface FinalReplyEditorProps {
   hasInsertedResource: boolean;
   canAddPersonalExample: boolean;
   refining: boolean;
+  /** Shown when a rewrite was refused or failed, so a dead press is explained. */
+  notice: string | null;
   onChange(value: string): void;
   onRefine(action: 'shorter' | 'more_direct' | 'warmer' | 'add_personal_example'): void;
   onAcceptProposal(): void;
@@ -103,6 +105,8 @@ export function FinalReplyEditor(props: FinalReplyEditorProps) {
           </Button>
         ) : null}
       </div>
+
+      {props.notice ? <StatusLine tone="error">{props.notice}</StatusLine> : null}
 
       {props.proposal ? (
         <Card className="mt-3 border-green bg-green-soft">

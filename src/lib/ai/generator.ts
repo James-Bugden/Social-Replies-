@@ -1,5 +1,5 @@
 import { GENERATION } from '@/lib/contracts/limits';
-import { AppError } from '@/lib/contracts/errors';
+import { AppError, type ErrorCode } from '@/lib/contracts/errors';
 import { assemblePrompt } from './prompts/assemble';
 import { parseProviderOutput, runGuards } from './guards';
 import { ProviderError, type GenerationContext, type ProviderIdea, type ReplyGenerator } from './types';
@@ -29,15 +29,40 @@ export interface GenerateOutcome {
   attempts: number;
   /** Present when status is not 'ok'. */
   failure?: {
-    code:
-      | 'provider_timeout'
-      | 'provider_unavailable'
-      | 'rate_limited'
-      | 'provider_invalid_response'
-      | 'withheld_unsafe';
+    code: GenerateFailureCode;
     detail: string;
     retryAfterSeconds?: number;
   };
+}
+
+export type GenerateFailureCode =
+  | 'provider_timeout'
+  | 'provider_unavailable'
+  | 'rate_limited'
+  | 'provider_invalid_response'
+  | 'withheld_unsafe';
+
+/**
+ * The reason the outcome gives, as the code the client is allowed to receive.
+ *
+ * Guards rejecting a response is not a provider fault, and reporting it as one put
+ * a 502 blaming the vendor in front of a decision this app made on purpose. The
+ * mapping lives here, next to the outcome it translates, so a route cannot quietly
+ * flatten two different problems into one again.
+ */
+export function errorCodeForOutcome(code: GenerateFailureCode | undefined): ErrorCode {
+  switch (code) {
+    case 'rate_limited':
+      return 'rate_limited';
+    case 'provider_timeout':
+      return 'provider_timeout';
+    case 'provider_invalid_response':
+      return 'provider_invalid_response';
+    case 'withheld_unsafe':
+      return 'withheld_unsafe';
+    default:
+      return 'provider_unavailable';
+  }
 }
 
 export interface GenerateDependencies {
@@ -53,7 +78,7 @@ export interface GenerateDependencies {
   env?: Readonly<Record<string, string | undefined>>;
 }
 
-function failureCodeFor(kind: ProviderError['kind']): NonNullable<GenerateOutcome['failure']>['code'] {
+function failureCodeFor(kind: ProviderError['kind']): GenerateFailureCode {
   switch (kind) {
     case 'timeout':
       return 'provider_timeout';
@@ -127,7 +152,7 @@ export async function generateIdeas(
       attemptResult = await deps.generator.complete(
         repairHint ? `${instruction}\n\n# Correction\n${repairHint}` : instruction,
         userContent,
-        { signal: controller.signal, maxOutputTokens: GENERATION.outputTokenBudget },
+        { signal: controller.signal, maxOutputTokens: GENERATION.outputTokenBudget, task: 'ideas' },
       );
     } catch (error) {
       clearTimeout(timer);

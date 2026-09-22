@@ -76,7 +76,14 @@ export function checkGrounding(
   const contextNumbers = new Set<string>([
     ...numbersIn(context.sourceText),
     ...numbersIn(context.parentText ?? ''),
+    // A rewrite's baseline is the owner's own words, so anything already in it is
+    // evidence rather than invention (C06).
+    ...numbersIn(context.ownerBaseline ?? ''),
   ]);
+
+  // Likewise for a first-person claim: if the owner wrote one, a revision that
+  // keeps it is not making it up.
+  const ownerMadeFirstPersonClaim = FIRST_PERSON_CLAIM.test(context.ownerBaseline ?? '');
 
   for (const idea of ideas) {
     const add = (kind: GroundingFinding['kind'], detail: string) =>
@@ -116,7 +123,7 @@ export function checkGrounding(
 
     const makesFirstPersonClaim = FIRST_PERSON_CLAIM.test(idea.reply_text);
 
-    if (makesFirstPersonClaim && citedText === '') {
+    if (makesFirstPersonClaim && citedText === '' && !ownerMadeFirstPersonClaim) {
       add(
         'unsupported_first_person',
         'The reply makes a first-person claim about the owner with no approved fact behind it.',

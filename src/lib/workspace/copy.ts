@@ -94,6 +94,8 @@ export const EDITOR = {
   keepMine: 'Keep my reply',
   replaceReply: 'Replace reply',
   undo: 'Undo',
+  rewriteWithheld: "That rewrite didn't pass the checks, so it isn't shown. Your reply is unchanged.",
+  rewriteFailed: "Couldn't rewrite that. Your reply is unchanged.",
 } as const;
 
 export const MEANING = {

@@ -2,6 +2,7 @@
 
 import { useId, useState } from 'react';
 import { Button, StatusLine } from '@/components/replies/primitives';
+import { classifyOtpOutcome } from '@/components/auth/otp-outcome';
 import { getBrowserClient } from '@/lib/supabase/client';
 
 /**
@@ -13,17 +14,24 @@ import { getBrowserClient } from '@/lib/supabase/client';
  * The response is deliberately the same whether or not the address is the owner's.
  * Saying "that is not the owner" would turn this form into a way to test addresses
  * against the account, and the owner already knows which address is theirs.
+ *
+ * That sameness covers refusals about the address, and nothing else. A send that
+ * never happened is reported as a send that never happened: every outcome below
+ * saying "a link is on its way" left the owner waiting for an email that a rate
+ * limit, a broken mailer or a rejected redirect had already stopped.
  */
 export function LoginForm() {
   const emailId = useId();
   const [email, setEmail] = useState('');
-  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle');
+  const [state, setState] = useState<
+    'idle' | 'sending' | 'sent' | 'rate_limited' | 'unavailable' | 'not_configured'
+  >('idle');
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     const client = getBrowserClient();
     if (!client) {
-      setState('failed');
+      setState('not_configured');
       return;
     }
 
@@ -37,7 +45,8 @@ export function LoginForm() {
         shouldCreateUser: false,
       },
     });
-    setState(error ? 'sent' : 'sent');
+    const outcome = classifyOtpOutcome(error);
+    setState(outcome === 'accepted' ? 'sent' : outcome);
   }
 
   return (
@@ -68,7 +77,16 @@ export function LoginForm() {
       {state === 'sent' ? (
         <StatusLine>If that address can sign in, a link is on its way.</StatusLine>
       ) : null}
-      {state === 'failed' ? (
+      {state === 'rate_limited' ? (
+        <StatusLine tone="error">Too many sign-in attempts just now. Wait a minute and try again.</StatusLine>
+      ) : null}
+      {state === 'unavailable' ? (
+        <StatusLine tone="error">
+          That could not be sent. The email service did not accept the request, so try again in a
+          moment.
+        </StatusLine>
+      ) : null}
+      {state === 'not_configured' ? (
         <StatusLine tone="error">Sign-in is not configured yet.</StatusLine>
       ) : null}
     </form>

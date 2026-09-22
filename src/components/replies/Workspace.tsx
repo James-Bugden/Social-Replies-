@@ -47,6 +47,7 @@ export function Workspace({
   const [state, dispatch] = useReducer(workspaceReducer, initialPlatform, initialState);
   const [busy, setBusy] = useState(false);
   const [refining, setRefining] = useState(false);
+  const [refineNotice, setRefineNotice] = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
   const [sourceExpanded, setSourceExpanded] = useState(false);
   const router = useRouter();
@@ -165,7 +166,11 @@ export function Workspace({
               ? 'rate_limited'
               : error.envelope.code === 'not_configured'
                 ? 'not_configured'
-                : 'failed'
+                : // The guards rejecting a response is not the provider failing,
+                  // and the owner is told which it was.
+                  error.envelope.code === 'withheld_unsafe'
+                  ? 'withheld'
+                  : 'failed'
             : 'failed';
         dispatch({
           type: 'generate_failed',
@@ -270,6 +275,7 @@ export function Workspace({
     async (action: 'shorter' | 'more_direct' | 'warmer' | 'add_personal_example') => {
       if (!state.sessionId) return;
       setRefining(true);
+      setRefineNotice(null);
       const baseVersion = state.editorVersion;
       try {
         const result = await api.refine({
@@ -288,8 +294,15 @@ export function Workspace({
             ideaId: null,
           },
         });
-      } catch {
-        // A failed refinement changes nothing. The editor still holds their text.
+      } catch (error) {
+        // A failed refinement changes nothing, but silence is its own bug: the
+        // owner presses Shorter, nothing happens, and they cannot tell whether it
+        // is slow, broken, or refused.
+        setRefineNotice(
+          error instanceof ApiError && error.envelope.code === 'withheld_unsafe'
+            ? EDITOR.rewriteWithheld
+            : EDITOR.rewriteFailed,
+        );
       } finally {
         setRefining(false);
       }
@@ -473,6 +486,7 @@ export function Workspace({
           hasInsertedResource={state.insertedResource !== null}
           canAddPersonalExample={hasEligibleFacts}
           refining={refining}
+          notice={refineNotice}
           onChange={onDraftChange}
           onRefine={onRefine}
           onAcceptProposal={() => dispatch({ type: 'accept_proposal', hash: draftHash })}

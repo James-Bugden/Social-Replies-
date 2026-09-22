@@ -20,6 +20,10 @@ export const errorCodeSchema = z.enum([
   'provider_invalid_response',
   'provider_timeout',
   'provider_unavailable',
+  // The provider did its job and the app decided not to show the result. It is a
+  // separate code because blaming the provider for the app's own refusal sends
+  // whoever reads it looking at the wrong system.
+  'withheld_unsafe',
   'not_configured',
   'internal_error',
 ]);
@@ -46,6 +50,9 @@ const STATUS: Readonly<Record<ErrorCode, number>> = Object.freeze({
   provider_invalid_response: 502,
   provider_timeout: 504,
   provider_unavailable: 503,
+  // Not a 5xx: nothing upstream failed. The request was understood and answered,
+  // and the answer was not fit to show.
+  withheld_unsafe: 422,
   not_configured: 503,
   internal_error: 500,
 });
@@ -144,6 +151,8 @@ export const GENERIC_MESSAGE: Readonly<Record<ErrorCode, string>> = Object.freez
   provider_invalid_response: "Couldn't create reply ideas. Your draft is unchanged.",
   provider_timeout: "Couldn't create reply ideas. Your draft is unchanged.",
   provider_unavailable: "Couldn't create reply ideas. Your draft is unchanged.",
+  withheld_unsafe:
+    "These suggestions didn't pass the grounding checks, so they aren't shown. Your draft is unchanged.",
   not_configured: 'Reply ideas are not configured yet. Your draft is unchanged.',
   internal_error: 'Something went wrong. Your text is still here.',
 });

@@ -4,6 +4,7 @@ import { getStore } from '@/lib/server/get-store';
 import { AppError } from '@/lib/contracts/errors';
 import { meaningRequestSchema, type MeaningResponse } from '@/lib/contracts/api';
 import { createGenerator } from '@/lib/ai';
+import { assembleTranslationInstruction, parseTranslationOutput } from '@/lib/ai/tasks';
 import { contentHash } from '@/lib/contracts/text';
 import { GENERATION } from '@/lib/contracts/limits';
 
@@ -19,6 +20,11 @@ export const dynamic = 'force-dynamic';
  * The response carries the hash of the exact text it describes. If the owner typed
  * while it was in flight, the client compares hashes and discards this answer
  * rather than showing an English sentence that describes text that no longer exists.
+ *
+ * The answer is validated against the shape this task asks for, not merely checked
+ * for being non-empty. Anything the provider returns here is saved to the session
+ * and shown as what the owner's Chinese says, so text that is plainly not a
+ * translation is a failure to report rather than a meaning to store.
  */
 export const POST = ownerRoute(async (request, { session }) => {
   const body = await readJson(request, meaningRequestSchema);
@@ -47,17 +53,16 @@ export const POST = ownerRoute(async (request, { session }) => {
   const timer = setTimeout(() => controller.abort(), GENERATION.attemptDeadlineMs);
   try {
     const attempt = await generator.complete(
-      [
-        'You translate a Traditional Chinese social reply into English so its author can check it.',
-        'Return only the English. Say what the Chinese says, including its tone.',
-        'Do not improve it, do not add anything, and do not return the Chinese.',
-      ].join('\n'),
+      assembleTranslationInstruction(),
       replySession.draft_text,
-      { signal: controller.signal, maxOutputTokens: 800 },
+      { signal: controller.signal, maxOutputTokens: 800, task: 'translation' },
     );
 
-    const meaning = attempt.rawText.trim();
-    if (meaning === '') throw new AppError('provider_invalid_response', 'Could not refresh the English meaning.');
+    const parsed = parseTranslationOutput(attempt.rawText);
+    if (!parsed.ok) {
+      throw new AppError('provider_invalid_response', 'Could not refresh the English meaning.');
+    }
+    const meaning = parsed.value.english_meaning.trim();
 
     await store.setSessionMeaning(body.session_id, meaning, currentHash);
 

@@ -14,7 +14,7 @@ export type ParseResult =
   | { ok: false; reason: 'not_json' | 'wrong_shape'; detail: string };
 
 /** Finds the outermost balanced JSON object, ignoring braces inside strings. */
-function extractJsonObject(text: string): string | null {
+export function extractJsonObject(text: string): string | null {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text);
   const haystack = fenced?.[1] ?? text;
 
