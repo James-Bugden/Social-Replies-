@@ -14,10 +14,16 @@ and every adapter is labelled `synthetic-tested`.
 export PRIVATE_SOURCE_ROOT=/path/to/your/private/exports   # never committed
 export SUPABASE_DB_URL=postgres://...                      # server-side credential
 export PRIVATE_OWNER_AUTHOR_IDS=...                        # your platform author ids
+export SR_OWNER_ID=...                                     # the enabled owner's uuid
 ```
 
 `PRIVATE_OWNER_AUTHOR_IDS` is what lets an adapter prove a comment is yours.
 Without it every authored row is sent to review, which is honest and useless.
+
+`SR_OWNER_ID` is only a convenience for the shell below, so the uuid is typed
+once instead of five times. It is not read by the CLI and it does not belong in
+any committed file: the owner's id lives in `private.app_owner` and nowhere else
+(C01). Read it from the database you are importing into, not from a note.
 
 Put the export files under `PRIVATE_SOURCE_ROOT`. They are ignored by Git and the
 private-path policy check fails the build if one is ever staged.
@@ -25,12 +31,31 @@ private-path policy check fails the build if one is ever staged.
 ## The order to run things
 
 ```bash
-npm run import -- validate  --source linkedin --file comments.csv
-npm run import -- dry-run   --source linkedin --file comments.csv
-npm run import -- import    --source linkedin --file comments.csv
-npm run import -- resume    --batch <id>      # after an interruption
-npm run import -- report    --batch <id>
+npm run import -- validate --source linkedin --file comments.csv
+npm run import -- dry-run  --source linkedin --file comments.csv --owner "$SR_OWNER_ID"
+npm run import -- import   --source linkedin --file comments.csv --owner "$SR_OWNER_ID"
+npm run import -- resume   --source linkedin --file comments.csv --owner "$SR_OWNER_ID"
+npm run import -- report   --owner "$SR_OWNER_ID"
 ```
+
+Three things about those commands are easy to get wrong.
+
+`--owner` is required by every mode that touches the database. The CLI connects
+directly, so there is no session and `auth.uid()` is null; without the flag the
+run is refused with `error=owner_not_resolved` rather than writing rows with no
+owner. The uuid is checked against the enabled owner before the first write, and
+a uuid that is not that owner is refused with `error=not_the_enabled_owner`. That
+refusal is doing real work: the policies require both `user_id = auth.uid()` and
+the private owner check, so rows written under any other uuid commit cleanly and
+are then unreadable by everybody, including you.
+
+`resume` takes the same `--source` and `--file` as the run it is continuing. A
+batch is identified by the file's hash and the adapter version, so the CLI has to
+read the file again to work out which batch you mean. There is no `--batch` flag
+and there never was.
+
+`validate` is the one mode that needs neither `--owner` nor a database. It reads
+and classifies the file and stops.
 
 Do not skip `dry-run`. It parses everything and writes nothing, and its
 disposition counts are how you find out that an adapter's assumption about the

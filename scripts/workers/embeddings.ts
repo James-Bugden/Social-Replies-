@@ -19,7 +19,7 @@
  * reply text.
  */
 import { connectAsAdmin } from '../lib/db';
-import { processEmbeddingJobs } from '@/lib/embeddings/worker';
+import { runOwnerScopedPass } from '@/lib/embeddings/worker';
 import { createEmbedder } from '@/lib/embeddings/provider';
 import { serverConfig } from '@/lib/config/env';
 
@@ -37,25 +37,45 @@ if (config.embedding.mode === 'unconfigured') {
 const connection = await connectAsAdmin();
 const embedder = createEmbedder(config);
 
-async function pass() {
-  const report = await processEmbeddingJobs(connection, embedder);
+/**
+ * Returns false when the pass was refused, so the caller stops instead of
+ * looping. A worker that cannot establish whose rows it is holding must not run
+ * at all: with an administrative connection there is no row level security to
+ * catch the mistake, and the first thing it would do is send another account's
+ * private writing to an embedding provider (C01).
+ */
+async function pass(): Promise<boolean> {
+  const outcome = await runOwnerScopedPass(connection, embedder);
+
+  if (outcome.status === 'refused') {
+    console.error(`embedding worker: refusing to run, reason=${outcome.reason}`);
+    return false;
+  }
+
+  const { report } = outcome;
+  // The owner's id is never printed. It is the one identifier this repository
+  // is not allowed to carry, and a worker log is a terminal recording away from
+  // being public (C01, C10).
   console.log(
     `embedding worker: claimed=${report.claimed} applied=${report.applied} ` +
       `superseded=${report.superseded} retried=${report.retried} dead=${report.dead} ` +
       `storage_unavailable=${report.storageUnavailable}`,
   );
-  return report;
+  return true;
 }
 
 try {
   if (once) {
-    await pass();
+    if (!(await pass())) process.exitCode = 1;
   } else {
     // A plain loop rather than a scheduler. Whatever actually triggers this in
     // production must be verified there: a script existing is not evidence that
     // anything runs it (#21).
     for (;;) {
-      await pass();
+      if (!(await pass())) {
+        process.exitCode = 1;
+        break;
+      }
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
   }

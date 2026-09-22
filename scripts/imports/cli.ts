@@ -8,7 +8,13 @@
  * to push through an HTTP endpoint built for one reply at a time.
  *
  *   PRIVATE_SOURCE_ROOT=... SUPABASE_DB_URL=... \
- *     npm run import -- dry-run --source drive --file history/replies.jsonl
+ *     npm run import -- dry-run --source drive --file history/replies.jsonl \
+ *       --owner <the enabled owner's uuid>
+ *
+ * Every mode that touches the database needs `--owner`, because a direct
+ * connection has no session and `auth.uid()` is null there. The uuid is verified
+ * against the private owner table before the first write: one that is not the
+ * enabled owner would produce rows no policy ever lets anyone read back.
  *
  * Modes:
  *   validate  read and classify the file, touch no database
@@ -30,6 +36,7 @@ import { connectAsAdmin } from '../lib/db';
 import { adapterFor, runImport, transactionalDatabase } from '@/lib/imports';
 import { IMPORT_LIMITS, resolveWithinRoot } from '@/lib/imports/safety';
 import { formatCoverageReport, loadCoverage } from '@/lib/imports/report';
+import { verifyImportOwner } from '@/lib/imports/owner';
 import type { ImportDatabase, SqlRunner } from '@/lib/imports/types';
 import { importSourceTypeSchema } from '@/lib/contracts/vocabulary';
 
@@ -55,7 +62,11 @@ interface Options {
 function parseArgs(argv: readonly string[]): Options | { error: string } {
   const [first, ...rest] = argv;
   const mode = MODES.find((candidate) => candidate === first);
-  if (!mode) return { error: `usage: import <${MODES.join('|')}> [--source s] [--file p]` };
+  if (!mode) {
+    return {
+      error: `usage: import <${MODES.join('|')}> [--source s] [--file p] [--owner uuid] [--chunk n]`,
+    };
+  }
 
   const options: Options = {
     mode,
@@ -111,9 +122,15 @@ export async function runCli(argv: readonly string[], deps: CliDependencies): Pr
   if (parsed.mode === 'report') {
     const connection = await deps.connect();
     try {
-      const report = await loadCoverage(connection.db, {
-        ...(parsed.ownerId ? { ownerId: parsed.ownerId } : {}),
-      });
+      const owner = await connection.db.transaction((q: SqlRunner) =>
+        verifyImportOwner(q, parsed.ownerId),
+      );
+      if (!owner.ok) {
+        deps.out(`error=${owner.reason}`);
+        return 2;
+      }
+
+      const report = await loadCoverage(connection.db, { ownerId: owner.ownerId });
       for (const line of formatCoverageReport(report)) deps.out(line);
       return 0;
     } finally {
@@ -215,13 +232,24 @@ export async function runCli(argv: readonly string[], deps: CliDependencies): Pr
 
   const connection = await deps.connect();
   try {
+    // Before anything is read against the archive and long before anything is
+    // written to it. An unverified `--owner` writes rows that no policy will
+    // ever let anyone read back (C01).
+    const owner = await connection.db.transaction((q: SqlRunner) =>
+      verifyImportOwner(q, parsed.ownerId),
+    );
+    if (!owner.ok) {
+      deps.out(`error=${owner.reason}`);
+      return 2;
+    }
+
     if (parsed.mode === 'resume') {
       const open = await connection.db.transaction(async (q: SqlRunner) => {
         const { rows } = await q.query<{ n: string }>(
           `select count(*)::text as n from public.import_batches
            where user_id = coalesce($1::uuid, (select auth.uid()))
              and source_file_hash = $2 and adapter_version = $3 and status = 'open'`,
-          [parsed.ownerId, sourceFileHash, adapter.adapterVersion],
+          [owner.ownerId, sourceFileHash, adapter.adapterVersion],
         );
         return Number(rows[0]?.n ?? '0');
       });
@@ -238,7 +266,10 @@ export async function runCli(argv: readonly string[], deps: CliDependencies): Pr
       sourceFileHash,
       chunkSize: parsed.chunkSize,
       dryRun: parsed.mode === 'dry-run',
-      ...(parsed.ownerId ? { ownerId: parsed.ownerId } : {}),
+      // The verified owner, not the requested one. They are the same value when
+      // the run is allowed to proceed, and passing the verified one is what makes
+      // that fact checkable at the call site.
+      ownerId: owner.ownerId,
     });
 
     deps.out(`run_status=${result.status} resumed_after=${result.resumedAfterOrdinal}`);

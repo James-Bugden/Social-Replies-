@@ -269,27 +269,36 @@ test.describe('honest states', () => {
     await page.goto('/');
     await analyse(page, 'example ai draft that was never posted');
 
-    // The seed corpus holds an AI draft containing exactly this phrase. Voice
-    // evidence excludes it, so it must not appear in the workspace at all.
-    const history = page.locator('section', { has: page.getByRole('heading', { level: 2 }) });
-    await expect(page.getByText('Example AI draft that was never posted')).toHaveCount(0);
+    // Scoped to the result rows, not the page: the query itself sits in the
+    // source box, so a page-wide text match would find the words the test just
+    // typed and prove nothing.
+    const rows = page.getByRole('listitem');
+    await expect(rows.filter({ hasText: 'Example AI draft that was never posted' })).toHaveCount(0);
 
-    // And it must never be labelled as something that was posted.
-    await expect(history.getByText('AI draft')).toHaveCount(0);
+    // Two confirmed replies do match this query, so the section is populated and
+    // the assertion above is about exclusion rather than an empty list.
+    await expect(rows.filter({ hasText: 'Example past reply' }).first()).toBeVisible();
+
+    // And nothing on offer is labelled as a draft, because voice evidence is
+    // confirmed writing only.
+    await expect(rows.getByText('AI draft', { exact: true })).toHaveCount(0);
 
     // It is still the owner's own writing, so the library finds it, labelled
     // honestly rather than hidden or dressed up as a reply.
     await page.goto('/library');
     await page
-      .getByRole('textbox', { name: /Search/ })
-      .first()
+      .getByRole('textbox', { name: 'Search your past replies' })
       .fill('example ai draft that was never posted');
-    await page.getByRole('button', { name: /Search/ }).first().click();
+    await page.getByRole('button', { name: 'Search', exact: true }).click();
 
-    const row = page.locator('li').filter({ hasText: 'Example AI draft that was never posted' });
-    await expect(row).toBeVisible();
-    await expect(row.getByText('AI draft')).toBeVisible();
-    await expect(row.getByText('Posted', { exact: true })).toHaveCount(0);
+    const libraryRow = page
+      .getByRole('listitem')
+      .filter({ hasText: 'Example AI draft that was never posted' });
+    await expect(libraryRow).toBeVisible();
+    // Exact, because the reply's own text contains the words as well as the
+    // provenance pill does.
+    await expect(libraryRow.getByText('AI draft', { exact: true })).toBeVisible();
+    await expect(libraryRow.getByText('Posted', { exact: true })).toHaveCount(0);
   });
 });
 

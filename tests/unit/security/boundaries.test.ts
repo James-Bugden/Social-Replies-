@@ -196,13 +196,13 @@ describe('generated social text avoids the owner’s banned punctuation', () => 
     // terminology.ts is the one file that must contain the character: it is the
     // detector. Exempting the detector is not the same as exempting the rule,
     // and the case below proves the rule still fires.
-    const files = [
-      ...trackedFiles('src/lib/ai/prompts/', ['.ts']).filter(
-        (file) => !file.endsWith('terminology.ts'),
-      ),
-      'src/lib/workspace/copy.ts',
-    ];
-    expect(files.length).toBeGreaterThan(1);
+    // Widened from the prompt modules to the whole of src/. The owner does not
+    // use this character, so a comment that contains one is a comment written in
+    // someone else's voice, and prose has a way of migrating into strings.
+    const files = trackedFiles('src/', ['.ts', '.tsx']).filter(
+      (file) => !file.endsWith('terminology.ts'),
+    );
+    expect(files.length).toBeGreaterThan(20);
 
     for (const file of files) {
       expect(read(file).includes('—'), `${file} contains an em dash`).toBe(false);

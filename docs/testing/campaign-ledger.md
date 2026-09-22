@@ -17,7 +17,7 @@ npm run typecheck      clean
 npm run lint           clean
 npm run check:private  clean
 npm run check:secrets  clean
-npm test               436 passed (29 files)
+npm test               541 passed (36 files)
 npm run test:e2e       58 passed across narrow-600 and wide-1280
 ```
 
@@ -44,7 +44,7 @@ repeated as an excuse in each row.
 | ID | Result | Evidence and limits |
 |---|---|---|
 | SEC-01 | **pass** (local) / **pass for anonymous, partial for a second account** (hosted) | 17 tests. Table list read from `pg_tables`, not hard-coded, so a new table with no policy fails the suite. Anonymous gets `permission denied` on all 14 tables; a second authenticated user reads 0 rows from all 14 and cannot insert rows it claims to own; disabling the owner record revokes access immediately; a second enabled owner cannot be created. Hosted, through the real PostgREST API rather than by reading the schema: an anonymous caller carrying the project's publishable key gets **401 on every table** (`reply_library`, `facts`, `resources`, `reply_sessions`, `mutation_keys`, `search_documents`, `source_posts`), **401** on `is_app_owner` and `daily_counts`, and **404** on the retrieval functions, which are not exposed at all. Grants and policy counts also verified by query: 14 tables, 14 with forced RLS, 56 policies, 0 anon grants. **Still missing: the same probe as a second authenticated account**, which needs a real auth user and belongs to #21 |
-| SEC-02 | **pass** | Composite foreign keys reject a cross-owner parent with `23503`; RLS `WITH CHECK` rejects an insert or update that claims another `user_id`. Same-origin enforcement on every mutation is implemented and unit-covered; a cross-origin attempt from a real browser is not |
+| SEC-02 | **pass** | Composite foreign keys reject a cross-owner parent with `23503`; RLS `WITH CHECK` rejects an insert or update that claims another `user_id`. Same-origin enforcement now has 15 tests covering cross-site, lookalike subdomain, subdomain, plain-http, null and malformed origins, every mutating method, and the proxy protocol header. **It had none until an adversarial review mutated it to a no-op and watched every test stay green**, and writing them found that it compared hosts rather than origins. A cross-origin attempt from a real browser is still not covered |
 | SEC-03 | **pass** | 12 tests. A synthetic sentinel and seven credential shapes are planted in a temp directory outside the repo and each is detected; the scanner never prints the matched value; a clean directory passes. **GitHub's own secret-scanning toggle is an account setting and is not asserted enabled by anything here** |
 | SEC-04 | **partial** | Architectural: a boundary test asserts no provider adapter defines a tool, a `tool_choice` or a `function_call`, and that only the Anthropic adapter reaches the network. The prompt fences untrusted blocks with a nonce the pasted text cannot predict, proven by a test that tries to close the fence early. **Not covered: whether a real model obeys any of it.** The fake ignores instructions, so it cannot refute them |
 | SEC-05 | **partial** | `Cache-Control: private, no-store` verified on a live response in the browser suite. Library search is a POST so the query never enters a URL. **Not covered: logout clearing tab-local recovery**, because tab-local recovery is not implemented; drafts live on the server behind version checks instead |
@@ -151,6 +151,15 @@ verified by a separate agent that tried to refute it.
 **Twenty-two defects were confirmed.** That is the argument for running this round
 at all: every one of them survived a green suite, and several survived because the
 test that was supposed to catch them could not fail.
+
+All twenty-two are fixed. Each fix was proved by reverting it, watching the new
+test go red, and restoring it, so no fix here rests on a test that has only ever
+been green. Three more defects were found while writing those tests: the origin
+check compared hosts rather than origins, so `http://app` counted as same-origin
+with `https://app`; `analyse` claimed its idempotency key before the inserts and
+wrote the result afterwards, so a retry mid-flight created a second session; and
+the embedding worker had no owner predicate at all, so it would have embedded
+every account's rows over an admin connection.
 
 Rows in this ledger that were wrong, and are now corrected below: UX-03 claimed
 drafts survive navigation, SEC-02 claimed same-origin enforcement was unit-covered

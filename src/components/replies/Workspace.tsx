@@ -331,7 +331,7 @@ export function Workspace({
     } catch {
       dispatch({ type: 'meaning_failed' });
     }
-  }, [state.sessionId, state.draft, draftHash]);
+  }, [state.sessionId, draftHash]);
 
   const onMarkPosted = useCallback(async () => {
     if (!state.sessionId) return;
