@@ -11,6 +11,8 @@ import {
   markPostedRequestSchema,
   resourceInputSchema,
   factInputSchema,
+  factUpdateSchema,
+  resourceUpdateSchema,
   librarySearchRequestSchema,
 } from '@/lib/contracts/api';
 import { codeForSqlState, statusForCode, isRetryable } from '@/lib/contracts/errors';
@@ -273,5 +275,32 @@ describe('configuration (C10)', () => {
     expect(status.generation).toBe('live');
     expect(status.generation_model).toBe('claude-sonnet-5');
     expect(JSON.stringify(status)).not.toContain('not-a-real-key');
+  });
+});
+
+describe('partial updates never reset a field the caller did not mention', () => {
+  it('leaves fact fields absent rather than defaulted', () => {
+    const parsed = factUpdateSchema.parse({ expected_version: 1, changes: { approved: true } });
+
+    // `.partial()` on a schema with defaults would return sensitivity, tags and
+    // active here, and writing that object wholesale would silently reset a fact
+    // to private on every unrelated edit.
+    expect(Object.keys(parsed.changes)).toEqual(['approved']);
+  });
+
+  it('leaves resource fields absent rather than defaulted', () => {
+    const parsed = resourceUpdateSchema.parse({ expected_version: 2, changes: { active: false } });
+
+    expect(Object.keys(parsed.changes)).toEqual(['active']);
+  });
+
+  it('still validates the fields that are present', () => {
+    expect(
+      factUpdateSchema.safeParse({ expected_version: 1, changes: { fact_text: '' } }).success,
+    ).toBe(false);
+    expect(
+      resourceUpdateSchema.safeParse({ expected_version: 1, changes: { allowed_platforms: [] } })
+        .success,
+    ).toBe(false);
   });
 });

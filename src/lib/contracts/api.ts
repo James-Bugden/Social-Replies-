@@ -391,9 +391,37 @@ export const resourceInputSchema = resourceFieldsSchema
   });
 export type ResourceInput = z.infer<typeof resourceInputSchema>;
 
+/**
+ * Partial updates strip the defaults deliberately.
+ *
+ * `schema.partial()` keeps each field's `.default()`, so a payload that omits a
+ * key parses into that key's default rather than into "leave it alone". Applied to
+ * an update, that silently resets every field the caller did not mention: a change
+ * to one flag would quietly reset a resource's allowed platforms. Verified against
+ * zod 4.6.5. The update schemas therefore describe optional fields with no defaults
+ * at all, so an absent key stays absent.
+ */
+const withoutDefaults = <T extends z.ZodRawShape>(shape: T) => z.object(shape).partial();
+
 export const resourceUpdateSchema = z.object({
   expected_version: z.number().int().positive(),
-  changes: resourceFieldsSchema.partial(),
+  changes: withoutDefaults({
+    type: resourceTypeSchema,
+    ownership: resourceOwnershipSchema,
+    title_en: z.string().min(1).max(300),
+    title_zh_tw: z.string().max(300).nullable(),
+    description: z.string().max(2000),
+    aliases: z.array(z.string().max(120)).max(30),
+    tags: z.array(z.string().max(60)).max(30),
+    canonical_path: z.string().max(500).nullable(),
+    zh_tw_path: z.string().max(500).nullable(),
+    external_url: z.string().url().nullable(),
+    cta_en: z.string().max(300).nullable(),
+    cta_zh_tw: z.string().max(300).nullable(),
+    allowed_platforms: z.array(platformSchema).min(1),
+    access_notes: z.string().max(500).nullable(),
+    active: z.boolean(),
+  }),
 });
 
 export const factInputSchema = z.object({
@@ -410,7 +438,15 @@ export type FactInput = z.infer<typeof factInputSchema>;
 
 export const factUpdateSchema = z.object({
   expected_version: z.number().int().positive(),
-  changes: factInputSchema.partial(),
+  changes: withoutDefaults({
+    fact_text: z.string().min(1).max(2000),
+    tags: z.array(z.string().max(60)).max(30),
+    approved: z.boolean(),
+    sensitivity: factSensitivitySchema,
+    active: z.boolean(),
+    valid_from: z.string().date().nullable(),
+    valid_to: z.string().date().nullable(),
+  }),
 });
 
 // ---------------------------------------------------------------------------
