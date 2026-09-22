@@ -1,0 +1,7 @@
+{
+  "schema": "some-other-product-export",
+  "version": 4,
+  "entries": [
+    { "kind": "note", "body": "Synthetic file that no adapter here was written for." }
+  ]
+}

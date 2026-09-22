@@ -18,7 +18,7 @@
  * a recorded outcome, not a crash. It prints counts and error codes only, never
  * reply text.
  */
-import { connectAsAdmin } from '../lib/db.mts';
+import { connectAsAdmin } from '../lib/db';
 import { processEmbeddingJobs } from '@/lib/embeddings/worker';
 import { createEmbedder } from '@/lib/embeddings/provider';
 import { serverConfig } from '@/lib/config/env';

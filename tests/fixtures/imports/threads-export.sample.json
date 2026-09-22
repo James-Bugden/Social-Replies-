@@ -1,0 +1,36 @@
+{
+  "schema": "threads-export",
+  "version": 1,
+  "history_from": "2026-01-01",
+  "timezone": "Asia/Taipei",
+  "replies": [
+    {
+      "id": "th-3001",
+      "text": "謝謝分享 🙏 面試前先把問題寫下來，現場就不會亂。",
+      "created_at": "2026-02-11T21:04:00+08:00",
+      "permalink": "https://example.com/threads/reply/3001",
+      "in_reply_to": {
+        "id": "th-p-2001",
+        "author": "someone-synthetic",
+        "text": "合成貼文：第一次面試最容易忽略的事。"
+      }
+    },
+    {
+      "id": "th-3002",
+      "text": "這題我會先問「你最後一次改變想法是什麼時候」。",
+      "created_at": "2026-02-12",
+      "permalink": "https://example.com/threads/reply/3002",
+      "in_reply_to": {
+        "id": "th-p-2002",
+        "author": "someone-synthetic",
+        "text": null
+      }
+    },
+    {
+      "id": "th-3003",
+      "text": "合成紀錄：沒有回覆對象，無法判斷是回覆還是貼文。",
+      "created_at": "2026-02-13T10:00:00+08:00",
+      "in_reply_to": null
+    }
+  ]
+}

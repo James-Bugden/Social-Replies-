@@ -39,8 +39,41 @@ describe('the request path never holds a database connection', () => {
     const connectors = trackedFiles('scripts/', ['.ts', '.mts', '.mjs']).filter((file) =>
       /new Client\(|new Pool\(/.test(read(file)),
     );
-    expect(connectors).toEqual(['scripts/lib/db.mts']);
+    expect(connectors).toEqual(['scripts/lib/db.ts']);
   });
+});
+
+describe('the typecheck gate is not blind to any source file', () => {
+  it('no tracked source file uses an extension tsconfig does not include', () => {
+    // `include` uses `**/*.ts`, which does **not** match `.mts` or `.cts`. Two
+    // scripts sat outside `npm run typecheck` for a while because of exactly this,
+    // and nothing went red: a gate that silently skips files reads as a pass.
+    // The project standardises on `.ts`, and this is what keeps it that way.
+    const stragglers = trackedFiles('', ['.mts', '.cts']);
+    expect(stragglers).toEqual([]);
+  });
+
+  it('every tracked TypeScript file is one tsc actually reads', () => {
+    // Asks the compiler what it read, rather than trusting the include globs to
+    // mean what they look like they mean.
+    const toPosix = (value: string) => value.split(String.fromCharCode(92)).join('/');
+    const root = `${toPosix(process.cwd())}/`;
+
+    const listed = new Set(
+      execFileSync('npx', ['tsc', '--noEmit', '--listFilesOnly'], {
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+        shell: true,
+      })
+        .split(String.fromCharCode(10))
+        .map((line) => toPosix(line.trim()))
+        .filter(Boolean)
+        .map((absolute) => (absolute.startsWith(root) ? absolute.slice(root.length) : absolute)),
+    );
+
+    const unchecked = trackedFiles('', ['.ts', '.tsx']).filter((file) => !listed.has(file));
+    expect(unchecked).toEqual([]);
+  }, 180_000);
 });
 
 describe('the service-role key never reaches a request', () => {

@@ -1,0 +1,4 @@
+comment_id,comment_url,posted_at,timezone,post_url,post_text,comment_author,comment_text
+li-c-2001,https://example.com/feed/comment/2001,2026-04-01T09:00:00+08:00,Asia/Taipei,https://example.com/feed/post/601,A synthetic post,owner-synthetic,The good neighbour above the broken row.
+li-c-2002,https://example.com/feed/comment/2002,2026-04-02T09:00:00+08:00
+li-c-2003,https://example.com/feed/comment/2003,2026-04-03T09:00:00+08:00,Asia/Taipei,https://example.com/feed/post/603,A synthetic post,owner-synthetic,The good neighbour below the broken row.

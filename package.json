@@ -19,8 +19,8 @@
     "check:secrets": "node scripts/scan-secrets.mjs",
     "verify": "npm run typecheck && npm run lint && npm run check:private && npm run check:secrets && npm run test",
     "db:apply": "node scripts/db/apply-migrations.mjs",
-    "import": "tsx scripts/imports/cli.mts",
-    "worker:embeddings": "tsx scripts/workers/embeddings.mts"
+    "import": "tsx scripts/imports/cli.ts",
+    "worker:embeddings": "tsx scripts/workers/embeddings.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

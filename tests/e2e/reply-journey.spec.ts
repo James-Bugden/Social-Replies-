@@ -289,3 +289,38 @@ test.describe('when the clipboard refuses (COPY-01)', () => {
     await expect(page.getByText(before ?? '')).toBeVisible();
   });
 });
+
+test.describe('the action strip reserves its own height (D01)', () => {
+  test('never covers the end of the reply, including after it changes size', async ({ page }) => {
+    await page.setViewportSize({ width: 600, height: 900 });
+    await page.goto('/');
+    await analyse(page);
+
+    const editor = page.getByRole('textbox', { name: 'Your reply' });
+    await editor.fill('A reply long enough to push the page past one screen.\n'.repeat(12));
+
+    async function bottomIsReachable() {
+      return page.evaluate(() => {
+        const strip = document.querySelector('[data-strip]') ?? document.body.lastElementChild;
+        const reserved = getComputedStyle(document.documentElement).getPropertyValue(
+          '--sr-action-strip-height',
+        );
+        const height = strip instanceof HTMLElement ? strip.offsetHeight : 0;
+        return { reserved: parseFloat(reserved) || 0, height };
+      });
+    }
+
+    const before = await bottomIsReachable();
+    expect(before.reserved).toBeGreaterThan(0);
+    expect(Math.abs(before.reserved - before.height)).toBeLessThanOrEqual(2);
+
+    // Recording swaps the strip for Undo and Next reply, which is a different
+    // height. The reserved space has to follow it.
+    await page.getByRole('button', { name: 'Mark posted' }).click();
+    await expect(page.getByText(/Saved\./)).toBeVisible();
+
+    const after = await bottomIsReachable();
+    expect(after.reserved).toBeGreaterThan(0);
+    expect(Math.abs(after.reserved - after.height)).toBeLessThanOrEqual(2);
+  });
+});
