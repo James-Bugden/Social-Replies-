@@ -1,0 +1,402 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { AppHeader } from './AppHeader';
+import { SourceInput } from './SourceInput';
+import { PastRepliesSection } from './PastRepliesSection';
+import { ResourcesSection } from './ResourcesSection';
+import { IdeasSection } from './IdeasSection';
+import { FinalReplyEditor } from './FinalReplyEditor';
+import { ActionStrip } from './ActionStrip';
+import { Button } from './primitives';
+import { EDITOR, MANUAL } from '@/lib/workspace/copy';
+import { initialState, isEditedSinceCopy, workspaceReducer } from '@/lib/workspace/reducer';
+import { api, ApiError, newOperationKey } from '@/lib/workspace/client';
+import { contentHash } from '@/lib/contracts/text';
+import type { Platform } from '@/lib/contracts/vocabulary';
+import type { Progress, QualifiedResource, ReplyIdea } from '@/lib/contracts/api';
+
+/**
+ * The workspace (D01, D04, UX-03).
+ *
+ * DOM order is source, history, resources, ideas, editor, and it stays that way at
+ * every width. At 1100 px and above the editor may sit in a second column, which is
+ * a change of presentation only: the order screen readers and keyboards traverse
+ * does not move.
+ *
+ * All the race handling lives in the reducer. What this component owns is the part
+ * that cannot be pure: abort controllers for superseded requests, a debounced draft
+ * save, and one stable operation key per save attempt.
+ */
+
+export interface WorkspaceProps {
+  initialPlatform?: Platform;
+  initialProgress?: Progress | null;
+  /** True when an eligible approved public-safe fact exists for this owner. */
+  hasEligibleFacts?: boolean;
+}
+
+export function Workspace({
+  initialPlatform = 'linkedin',
+  initialProgress = null,
+  hasEligibleFacts = false,
+}: WorkspaceProps) {
+  const [state, dispatch] = useReducer(workspaceReducer, initialPlatform, initialState);
+  const [busy, setBusy] = useState(false);
+  const [refining, setRefining] = useState(false);
+  const [showManual, setShowManual] = useState(false);
+  const router = useRouter();
+
+  const generationAbort = useRef<AbortController | null>(null);
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const operationKey = useRef<string | null>(null);
+
+  const draftHash = useMemo(() => contentHash(state.draft), [state.draft]);
+
+  useEffect(() => {
+    if (initialProgress) dispatch({ type: 'progress_refreshed', progress: initialProgress });
+  }, [initialProgress]);
+
+  // The local day rolls over at Taipei midnight and the window may have been in the
+  // background for hours, so the count is refetched on focus rather than trusted.
+  useEffect(() => {
+    function refresh() {
+      api
+        .progress()
+        .then((progress) => dispatch({ type: 'progress_refreshed', progress }))
+        .catch(() => {
+          // A stale counter is a cosmetic problem. It must not surface as an error
+          // over the top of the owner's work.
+        });
+    }
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, []);
+
+  const runGeneration = useCallback(
+    async (sessionId: string, sourceVersion: number, contextVersion: number, seedReplyIds: string[]) => {
+      generationAbort.current?.abort();
+      const controller = new AbortController();
+      generationAbort.current = controller;
+
+      dispatch({ type: 'generate_started', sourceVersion });
+      try {
+        const result = await api.generate(
+          {
+            session_id: sessionId,
+            source_version: sourceVersion,
+            context_version: contextVersion,
+            request_key: newOperationKey(),
+            ...(seedReplyIds.length > 0 ? { seed_reply_ids: seedReplyIds } : {}),
+          },
+          controller.signal,
+        );
+        dispatch({
+          type: 'generate_succeeded',
+          sourceVersion,
+          ideas: result.ideas,
+          suggestedIndex: result.suggested_index,
+          warnings: result.repetition_warning ? [result.repetition_warning] : [],
+        });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        const code =
+          error instanceof ApiError
+            ? error.envelope.code === 'rate_limited'
+              ? 'rate_limited'
+              : error.envelope.code === 'not_configured'
+                ? 'not_configured'
+                : 'failed'
+            : 'failed';
+        dispatch({
+          type: 'generate_failed',
+          sourceVersion,
+          code,
+          ...(error instanceof ApiError && error.envelope.retry_after_seconds
+            ? { retryAfterSeconds: error.envelope.retry_after_seconds }
+            : {}),
+        });
+      }
+    },
+    [],
+  );
+
+  const analyse = useCallback(async () => {
+    setBusy(true);
+    dispatch({ type: 'analyse_started' });
+    try {
+      const result = await api.analyse({
+        request_key: newOperationKey(),
+        platform: state.platform,
+        target_kind: state.targetKind,
+        source_text: state.sourceText,
+        ...(state.parentText ? { parent_text: state.parentText } : {}),
+        ...(state.sourceUrl ? { source_url: state.sourceUrl } : {}),
+      });
+
+      dispatch({
+        type: 'analyse_succeeded',
+        sessionId: result.session_id,
+        sourceVersion: result.source_version,
+        contextVersion: result.context_version,
+        editorVersion: result.editor_version,
+        history: {
+          state: result.history.state,
+          items: result.history.items,
+          nextCursor: result.history.next_cursor ?? null,
+          reason: (result.history.reason ?? null) as never,
+        },
+        resources: {
+          state: result.resources.state,
+          items: result.resources.items,
+          reason: (result.resources.reason ?? null) as never,
+        },
+      });
+
+      // Retrieval renders first; generation follows for a post or comment target.
+      // A model outage from here on cannot remove what has already been shown.
+      if (result.generation_expected) {
+        void runGeneration(result.session_id, result.source_version, result.context_version, []);
+      }
+    } catch {
+      dispatch({ type: 'analyse_failed' });
+    } finally {
+      setBusy(false);
+    }
+  }, [state.platform, state.targetKind, state.sourceText, state.parentText, state.sourceUrl, runGeneration]);
+
+  const onDraftChange = useCallback(
+    (value: string) => {
+      dispatch({ type: 'edit_draft', value, hash: contentHash(value) });
+
+      if (draftTimer.current) clearTimeout(draftTimer.current);
+      if (!state.sessionId) return;
+      const sessionId = state.sessionId;
+
+      draftTimer.current = setTimeout(() => {
+        api
+          .saveDraft({
+            session_id: sessionId,
+            expected_editor_version: state.editorVersion,
+            draft_text: value,
+          })
+          .then((result) => dispatch({ type: 'draft_saved_to_server', editorVersion: result.editor_version }))
+          .catch(() => {
+            // A failed debounced save is not shown. The text is still on screen and
+            // "Draft saved" is never claimed for text that only exists in memory.
+          });
+      }, 800);
+    },
+    [state.sessionId, state.editorVersion],
+  );
+
+  const onRefine = useCallback(
+    async (action: 'shorter' | 'more_direct' | 'warmer' | 'add_personal_example') => {
+      if (!state.sessionId) return;
+      setRefining(true);
+      const baseVersion = state.editorVersion;
+      try {
+        const result = await api.refine({
+          session_id: state.sessionId,
+          expected_editor_version: baseVersion,
+          action,
+          request_key: newOperationKey(),
+        });
+        // If the owner typed while this was running, the reducer drops it.
+        dispatch({
+          type: 'propose',
+          proposal: {
+            text: result.proposed_text,
+            baseEditorVersion: result.base_editor_version,
+            origin: 'refine',
+            ideaId: null,
+          },
+        });
+      } catch {
+        // A failed refinement changes nothing. The editor still holds their text.
+      } finally {
+        setRefining(false);
+      }
+    },
+    [state.sessionId, state.editorVersion],
+  );
+
+  const onRefreshMeaning = useCallback(async () => {
+    if (!state.sessionId) return;
+    const hashAtRequest = draftHash;
+    dispatch({ type: 'meaning_requested' });
+    try {
+      const result = await api.meaning({
+        session_id: state.sessionId,
+        text_hash: hashAtRequest,
+        request_key: newOperationKey(),
+      });
+      dispatch({
+        type: 'meaning_received',
+        text: result.english_meaning,
+        sourceHash: result.source_hash,
+        currentHash: contentHash(state.draft),
+      });
+    } catch {
+      dispatch({ type: 'meaning_failed' });
+    }
+  }, [state.sessionId, state.draft, draftHash]);
+
+  const onMarkPosted = useCallback(async () => {
+    if (!state.sessionId) return;
+    // One key per save action, reused by every retry of that same action.
+    operationKey.current ??= newOperationKey();
+    dispatch({ type: 'save_started' });
+    try {
+      const result = await api.markPosted(
+        {
+          session_id: state.sessionId,
+          editor_version: state.editorVersion,
+          final_text: state.draft,
+          resource_snapshots: state.insertedResource
+            ? [
+                {
+                  resource_id: state.insertedResource.resourceId,
+                  version: state.insertedResource.version,
+                  url: null,
+                  inserted_text: state.insertedResource.insertedText,
+                },
+              ]
+            : [],
+        },
+        operationKey.current,
+      );
+      dispatch({ type: 'save_succeeded', replyId: result.reply_id, progress: result.progress });
+      operationKey.current = null;
+    } catch {
+      dispatch({ type: 'save_failed' });
+    }
+  }, [state.sessionId, state.editorVersion, state.draft, state.insertedResource]);
+
+  const onUseIdea = useCallback((idea: ReplyIdea) => dispatch({ type: 'use_idea', idea }), []);
+
+  const onAddResource = useCallback(
+    (resource: QualifiedResource) => {
+      const insertion = resource.url
+        ? `\n\n${resource.cta_text} ${resource.url}`
+        : `\n\n${resource.cta_text}`;
+      dispatch({ type: 'insert_resource', resource, insertedText: insertion, hash: draftHash });
+    },
+    [draftHash],
+  );
+
+  return (
+    <>
+      <AppHeader progress={state.progress} />
+
+      <main
+        className="mx-auto max-w-[750px] px-4 py-4 xl:max-w-[1100px]"
+        style={{ paddingBottom: 'calc(var(--sr-action-strip-height) + 16px)' }}
+      >
+        <SourceInput
+          platform={state.platform}
+          targetKind={state.targetKind}
+          sourceText={state.sourceText}
+          parentText={state.parentText}
+          sourceUrl={state.sourceUrl}
+          busy={busy}
+          collapsed={state.sessionId !== null}
+          onPlatformChange={(platform) => dispatch({ type: 'set_platform', platform })}
+          onTargetKindChange={(targetKind) => dispatch({ type: 'set_target_kind', targetKind })}
+          onFieldChange={(field, value) => dispatch({ type: 'edit_source', field, value })}
+          onSubmit={analyse}
+          onExpandToggle={() => undefined}
+        />
+
+        <PastRepliesSection
+          section={state.history}
+          onRetry={analyse}
+          onMore={() => undefined}
+          onUse={(reply) => {
+            if (state.sessionId) {
+              void runGeneration(state.sessionId, state.sourceVersion, state.contextVersion, [reply.id]);
+            }
+          }}
+          onCopy={(reply) => {
+            void navigator.clipboard.writeText(reply.full_text).catch(() => undefined);
+          }}
+        />
+
+        <ResourcesSection
+          section={state.resources}
+          addedResourceId={state.insertedResource?.resourceId ?? null}
+          onAdd={onAddResource}
+          onCopyLink={(resource) => {
+            if (resource.url) void navigator.clipboard.writeText(resource.url).catch(() => undefined);
+          }}
+          onRetry={analyse}
+          onOpenResources={() => {
+            // Client-side navigation keeps the draft in memory, which matters here:
+            // the owner is being sent away mid-reply to add a resource (D14).
+            router.push('/resources');
+          }}
+        />
+
+        <IdeasSection
+          state={state.ideas}
+          platform={state.platform}
+          resources={state.resources.items}
+          onUse={onUseIdea}
+          onRetry={() => {
+            if (state.sessionId) {
+              void runGeneration(state.sessionId, state.sourceVersion, state.contextVersion, []);
+            }
+          }}
+        />
+
+        <FinalReplyEditor
+          platform={state.platform}
+          draft={state.draft}
+          proposal={state.proposal}
+          meaning={state.meaning}
+          canUndo={state.previousDraft !== null}
+          hasInsertedResource={state.insertedResource !== null}
+          canAddPersonalExample={hasEligibleFacts}
+          refining={refining}
+          onChange={onDraftChange}
+          onRefine={onRefine}
+          onAcceptProposal={() => dispatch({ type: 'accept_proposal', hash: draftHash })}
+          onRejectProposal={() => dispatch({ type: 'reject_proposal' })}
+          onRemoveResource={() => dispatch({ type: 'remove_resource', hash: draftHash })}
+          onUndo={() => dispatch({ type: 'undo' })}
+          onRefreshMeaning={onRefreshMeaning}
+        />
+
+        <div className="mb-4">
+          <Button variant="quiet" onClick={() => setShowManual(true)}>
+            {MANUAL.trigger}
+          </Button>
+          <a href="#your-reply" className="ml-3 text-meta text-ink-soft underline">
+            {EDITOR.jumpTo}
+          </a>
+        </div>
+      </main>
+
+      <ActionStrip
+        platform={state.platform}
+        draft={state.draft}
+        save={state.save}
+        editedSinceCopy={isEditedSinceCopy(state, draftHash)}
+        selectTargetId="your-reply"
+        onCopied={() => dispatch({ type: 'copied', hash: draftHash })}
+        onMarkPosted={onMarkPosted}
+        onUndoRecorded={() => undefined}
+        onNextReply={() => dispatch({ type: 'next_reply' })}
+      />
+
+      {showManual ? (
+        <div role="dialog" aria-modal="true" aria-label={MANUAL.heading} className="sr-only">
+          {/* The dialog itself is SR-018 work. The trigger exists here so the
+              workspace's own focus handling can be tested alongside it. */}
+          <Button onClick={() => setShowManual(false)}>{MANUAL.cancel}</Button>
+        </div>
+      ) : null}
+    </>
+  );
+}

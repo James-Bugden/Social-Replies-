@@ -44,6 +44,7 @@ describe('migrations', () => {
       '20260922000300_core_tables.sql',
       '20260922000400_rls_and_grants.sql',
       '20260922000500_recording_and_counters.sql',
+      '20260922000700_retrieval_candidates.sql',
     ]);
   });
 

@@ -1,0 +1,213 @@
+import { GENERATION } from '@/lib/contracts/limits';
+import { AppError } from '@/lib/contracts/errors';
+import { assemblePrompt } from './prompts/assemble';
+import { parseProviderOutput, runGuards } from './guards';
+import { ProviderError, type GenerationContext, type ProviderIdea, type ReplyGenerator } from './types';
+
+/**
+ * The generation orchestrator (C08, tests AI-01 and AI-02).
+ *
+ * Its whole job is to spend a bounded amount of time and money and then stop,
+ * leaving the owner's draft untouched whatever happens.
+ *
+ * The budget is shared, which is the point. There is one repair attempt for the
+ * whole request, not one per guard and not one per provider call, because the
+ * failure mode this avoids is a bad response quietly costing three times as much as
+ * a good one. A total budget sits above the per-attempt deadline so that a slow
+ * first attempt cannot leave a second one running past the request's own lifetime.
+ */
+
+export interface GenerateOutcome {
+  status: 'ok' | 'withheld' | 'failed';
+  ideas: ProviderIdea[];
+  warnings: string[];
+  promptVersion: string;
+  provider: string;
+  model: string;
+  usage: { inputTokens: number | null; outputTokens: number | null; durationMs: number };
+  /** Number of provider calls actually made. Includes the repair attempt. */
+  attempts: number;
+  /** Present when status is not 'ok'. */
+  failure?: {
+    code:
+      | 'provider_timeout'
+      | 'provider_unavailable'
+      | 'rate_limited'
+      | 'provider_invalid_response'
+      | 'withheld_unsafe';
+    detail: string;
+    retryAfterSeconds?: number;
+  };
+}
+
+export interface GenerateDependencies {
+  generator: ReplyGenerator;
+  /**
+   * Durable per-owner rate limiting. Counting rows the database already writes is
+   * the only version of this that survives more than one server instance, so the
+   * caller supplies the count rather than this module keeping one in memory.
+   */
+  countRunsInLastHour?: () => Promise<number>;
+  now?: () => number;
+  nonce?: string;
+  env?: Readonly<Record<string, string | undefined>>;
+}
+
+function failureCodeFor(kind: ProviderError['kind']): NonNullable<GenerateOutcome['failure']>['code'] {
+  switch (kind) {
+    case 'timeout':
+      return 'provider_timeout';
+    case 'rate_limited':
+      return 'rate_limited';
+    case 'invalid_response':
+      return 'provider_invalid_response';
+    default:
+      return 'provider_unavailable';
+  }
+}
+
+export async function generateIdeas(
+  context: GenerationContext,
+  deps: GenerateDependencies,
+): Promise<GenerateOutcome> {
+  const now = deps.now ?? Date.now;
+  const startedAt = now();
+  const { instruction, userContent, promptVersion } = assemblePrompt(context, {
+    ...(deps.nonce ? { nonce: deps.nonce } : {}),
+    ...(deps.env ? { env: deps.env } : {}),
+  });
+
+  if (deps.countRunsInLastHour) {
+    const used = await deps.countRunsInLastHour();
+    if (used >= GENERATION.requestsPerOwnerPerHour) {
+      throw new AppError('rate_limited', 'Reply ideas are temporarily paused. Your draft is unchanged.', {
+        retryAfterSeconds: 300,
+      });
+    }
+  }
+
+  let attempts = 0;
+  let lastWarnings: string[] = [];
+  let repairHint: string | null = null;
+  let usage: GenerateOutcome['usage'] = { inputTokens: null, outputTokens: null, durationMs: 0 };
+
+  const base = {
+    promptVersion,
+    provider: deps.generator.name,
+    model: deps.generator.model,
+  };
+
+  // The first attempt plus at most one repair. Nothing else adds a call.
+  for (let round = 0; round <= GENERATION.maxRepairAttempts; round += 1) {
+    const elapsed = now() - startedAt;
+    const remaining = GENERATION.totalRequestBudgetMs - elapsed;
+    if (remaining <= 0) {
+      return {
+        ...base,
+        status: 'failed',
+        ideas: [],
+        warnings: lastWarnings,
+        usage,
+        attempts,
+        failure: { code: 'provider_timeout', detail: 'The request budget ran out.' },
+      };
+    }
+
+    const controller = new AbortController();
+    const deadline = Math.min(GENERATION.attemptDeadlineMs, remaining);
+    const timer = setTimeout(() => controller.abort(), deadline);
+
+    attempts += 1;
+    let attemptResult;
+    try {
+      attemptResult = await deps.generator.complete(
+        repairHint ? `${instruction}\n\n# Correction\n${repairHint}` : instruction,
+        userContent,
+        { signal: controller.signal, maxOutputTokens: GENERATION.outputTokenBudget },
+      );
+    } catch (error) {
+      clearTimeout(timer);
+      if (!(error instanceof ProviderError)) {
+        return {
+          ...base,
+          status: 'failed',
+          ideas: [],
+          warnings: lastWarnings,
+          usage,
+          attempts,
+          failure: { code: 'provider_unavailable', detail: 'The provider could not be reached.' },
+        };
+      }
+
+      // Honour a Retry-After only when waiting would still leave time to try. An
+      // unapproved provider is never substituted: an outage keeps the manual path.
+      const retryAfter = error.retryAfterSeconds;
+      const canWait =
+        error.kind === 'rate_limited' &&
+        retryAfter !== undefined &&
+        round < GENERATION.maxRepairAttempts &&
+        now() - startedAt + retryAfter * 1000 + GENERATION.attemptDeadlineMs <=
+          GENERATION.totalRequestBudgetMs;
+
+      if (canWait) {
+        await new Promise((resolve) => setTimeout(resolve, retryAfter! * 1000));
+        continue;
+      }
+
+      return {
+        ...base,
+        status: 'failed',
+        ideas: [],
+        warnings: lastWarnings,
+        usage,
+        attempts,
+        failure: {
+          code: failureCodeFor(error.kind),
+          detail: error.message,
+          ...(retryAfter !== undefined ? { retryAfterSeconds: retryAfter } : {}),
+        },
+      };
+    }
+    clearTimeout(timer);
+
+    usage = attemptResult.usage;
+
+    const parsed = parseProviderOutput(attemptResult.rawText);
+    if (!parsed.ok) {
+      repairHint = `The previous response could not be read: ${parsed.detail}. Return JSON only.`;
+      continue;
+    }
+
+    const report = runGuards(parsed.value.ideas, context);
+    lastWarnings = report.warnings;
+
+    if (report.hardFailures.length === 0) {
+      return {
+        ...base,
+        status: 'ok',
+        ideas: parsed.value.ideas,
+        warnings: report.warnings,
+        usage,
+        attempts,
+      };
+    }
+
+    repairHint = report.repairHint;
+  }
+
+  // The repair budget is spent and the result is still unsafe. Showing it anyway
+  // would be the one failure the owner cannot detect by reading, so it is withheld
+  // and retrieval plus the manual editor carry the workflow.
+  return {
+    ...base,
+    status: 'withheld',
+    ideas: [],
+    warnings: lastWarnings,
+    usage,
+    attempts,
+    failure: {
+      code: 'withheld_unsafe',
+      detail: 'The suggestions did not pass the grounding checks and were not shown.',
+    },
+  };
+}
