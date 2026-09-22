@@ -1,48 +1,30 @@
 # Social Replies
 
-Social Replies is a single-user productivity app for drafting and remembering high-quality replies across LinkedIn, X, and Threads.
+A private, single-user assistant for writing and remembering useful LinkedIn, X and Threads replies. Keep the feed in one window and Social Replies in the other.
 
-The application is designed for a side-by-side desktop workflow: keep the social feed open in one browser window and Social Replies in the other.
+Paste a post/comment -> see past writing -> see shareable resources -> choose among three reply ideas -> edit -> copy and post manually -> mark posted -> remember the exact final reply.
 
-## Core workflow
+Daily targets: 10 replies on each platform, Asia/Taipei. Temporary app domain: `replies.jamesbugden.com`. The guide/tool resource origin is configured independently.
 
-1. Paste the post you want to reply to.
-2. See relevant replies you have written before.
-3. See useful resources you could share.
-4. Get three meaningfully different reply ideas.
-5. Edit the final reply.
-6. Copy and post it manually.
-7. Mark it posted.
-8. The exact final reply becomes searchable memory.
+## Current status
 
-Daily target: 10 LinkedIn + 10 X + 10 Threads replies.
+The product/implementation plan, inspected Mobbin research, UI copy/state specification, technical contracts, acceptance matrix and scoped GitHub backlog are supplied. The included HTML is a synthetic design comparison, not a connected or deployed application. Implementation and production verification remain open work for First Mate.
 
-Temporary app domain: `replies.jamesbugden.com`.
+## Start here
 
-## Product authority
+- [Complete product plan](SOCIAL-REPLIES-IMPLEMENTATION-SPEC.md)
+- [Inspected Mobbin research and recommendations](docs/design/mobbin-research.md)
+- [UI interactions and copy](docs/design/interaction-spec.md)
+- [A/B/C synthetic design comparison](docs/design/prototype.html)
+- [Schema, API, retrieval and recording contracts](docs/implementation/contracts.md)
+- [Acceptance and release matrix](docs/testing/acceptance-matrix.md)
+- [Issue/dependency index](SOCIAL-REPLIES-GITHUB-ISSUES.md)
+- [Build epic](https://github.com/James-Bugden/Social-Replies-/issues/1)
 
-Read [SOCIAL-REPLIES-IMPLEMENTATION-SPEC.md](SOCIAL-REPLIES-IMPLEMENTATION-SPEC.md) before implementation.
-
-The GitHub backlog is described in [SOCIAL-REPLIES-GITHUB-ISSUES.md](SOCIAL-REPLIES-GITHUB-ISSUES.md).
+Research is completed in #3. #4 owns actual component/Orca validation. Use the documented compact reference-first default rather than restarting broad design discovery. GitHub displays HTML as source; open the local file in a browser to try the synthetic comparison.
 
 ## Public repository safety
 
-This repository is public.
+Source code is public. Application data is not. No real credentials, owner account identifiers, historical reply exports, private Drive contents/locators, production dumps, sensitive screenshots or logs in Git, issues, PRs or CI artifacts. Real imports and evaluation data stay in private storage; tests use synthetic fixtures. `.env.example` contains names and blank secret/private values only.
 
-Never commit:
-
-- API keys, tokens, credentials, passwords, cookies, or service-role keys
-- production environment files
-- real historical reply exports or source-post archives
-- private user data, account identifiers, or login email addresses
-- production database dumps
-- screenshots, logs, fixtures, or test artifacts containing real private content
-- private Drive exports or copied private documents
-
-Use synthetic fixtures in tests. Real reply history belongs in the authenticated database/private import pipeline, not Git.
-
-See [SECURITY.md](SECURITY.md).
-
-## Build workflow
-
-Implementation is orchestrated through First Mate and follows the canonical Coding Workflow and Agent Rules. User-visible work requires Playwright plus browser/UX review in Orca. Mobile-sensitive behavior escalates to simulator or real-device testing when required.
+Read [SECURITY.md](SECURITY.md) and [AGENTS.md](AGENTS.md). The existence of those files does not mean production security settings or CI scanning have been enabled; #2 implements and verifies the foundation.
