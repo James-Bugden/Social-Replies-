@@ -1,12 +1,9 @@
-# Dependencies / build
 node_modules/
 .next/
 dist/
 build/
 coverage/
 .turbo/
-
-# Local environment and secrets
 .env
 .env.*
 !.env.example
@@ -14,31 +11,25 @@ coverage/
 *.key
 *.p12
 *.pfx
-
-# Local/private product data
+private/
+**/private/
+local-data/
 data/private/
 imports/private/
 exports/private/
-private/
-local-data/
+tests/evals/private/
 *.sqlite
 *.sqlite3
-
-# Auth/session state
 playwright/.auth/
 .auth/
 cookies*.json
 storage-state*.json
-
-# Test/output artifacts that may contain user content
 test-results/
 playwright-report/
-screenshots/private/
-artifacts/private/
+artifacts/
+traces/
 tmp/
 temp/
-
-# OS/editor
 .DS_Store
 .idea/
 .vscode/*.local.*
