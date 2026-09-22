@@ -3,7 +3,6 @@ import type { OwnerSession } from '@/lib/auth/owner';
 import { AppError } from '@/lib/contracts/errors';
 import { APP, RETRIEVAL, RESOURCES as RESOURCE_LIMITS } from '@/lib/contracts/limits';
 import { contentHash, searchText } from '@/lib/contracts/text';
-import { isEligibleForGeneration } from '@/lib/facts/eligibility';
 import { selectRelevantFacts } from '@/lib/facts/selection';
 import { buildFactContext } from '@/lib/facts/context';
 import { isInsertable } from '@/lib/resources/eligibility';
@@ -14,7 +13,11 @@ import { searchReplies } from '@/lib/retrieval/search';
 import { rpcCandidateSource } from '@/lib/retrieval/candidates';
 import type { PastReply, Progress, QualifiedResource, ReplyIdea } from '@/lib/contracts/api';
 import type { Platform } from '@/lib/contracts/vocabulary';
+import { eligibilityReason, isEligibleForGeneration } from '@/lib/facts/eligibility';
 import type {
+  AdminFact,
+  AdminResource,
+  AdminSettings,
   AnalyseInput,
   AnalyseResult,
   GenerationRunInput,
@@ -189,6 +192,72 @@ export function createSupabaseStore(session: OwnerSession): Store {
     },
 
     async analyse(input: AnalyseInput): Promise<AnalyseResult> {
+      // Claim the request key first. A double press then reuses the session it
+      // already made instead of leaving an orphaned session and source row behind.
+      const { data: claimed } = await supabase
+        .from('mutation_keys')
+        .insert({
+          user_id: userId,
+          key: input.requestKey,
+          request_fingerprint: contentHash(input.sourceText),
+          operation: 'analyse',
+        })
+        .select('key')
+        .maybeSingle();
+
+      if (!claimed) {
+        const { data: existing } = await supabase
+          .from('mutation_keys')
+          .select('result_id')
+          .eq('key', input.requestKey)
+          .maybeSingle();
+        const existingSession = existing?.result_id
+          ? await this.getSession(existing.result_id)
+          : null;
+        if (existingSession) {
+          const [history, resources] = await Promise.all([
+            searchReplies(candidates, {
+              query: input.sourceText,
+              includeAiDrafts: false,
+              cursor: null,
+              limit: RETRIEVAL.initialResults,
+            }).catch(() => ({ state: 'error' as const, items: [] as PastReply[], next_cursor: null })),
+            qualifiedResourcesFor(input.sourceText, input.platform).catch(() => ({
+              items: [] as QualifiedResource[],
+              reason: 'lookup_failed' as const,
+            })),
+          ]);
+          return {
+            sessionId: existingSession.id,
+            sourcePostId: existingSession.source_post_id,
+            sourceVersion: existingSession.source_version,
+            contextVersion: 1,
+            editorVersion: existingSession.editor_version,
+            history: {
+              state: history.state,
+              items: history.items,
+              nextCursor: history.next_cursor,
+              reason:
+                history.state === 'error'
+                  ? 'lookup_failed'
+                  : history.items.length === 0
+                    ? 'no_match'
+                    : null,
+            },
+            resources: {
+              state:
+                resources.reason === 'lookup_failed'
+                  ? 'error'
+                  : resources.items.length > 0
+                    ? 'ready'
+                    : 'empty',
+              items: resources.items,
+              reason: resources.reason,
+            },
+          };
+        }
+      }
+
       const { data: sourceRow, error: sourceError } = await supabase
         .from('source_posts')
         .insert({
@@ -218,6 +287,11 @@ export function createSupabaseStore(session: OwnerSession): Store {
       if (sessionError || !sessionRow) {
         throw new AppError('internal_error', 'Something went wrong. Your text is still here.');
       }
+
+      await supabase
+        .from('mutation_keys')
+        .update({ result_id: sessionRow.id })
+        .eq('key', input.requestKey);
 
       // Retrieval and resource qualification are independent, so a failure in one
       // never blanks the other (FR-05, D04).
@@ -493,6 +567,106 @@ export function createSupabaseStore(session: OwnerSession): Store {
         .limit(20);
       const now = new Date();
       return (data ?? []).some((row) => isEligibleForGeneration(row as never, now));
+    },
+
+    async listResources(): Promise<AdminResource[]> {
+      const { data, error } = await supabase
+        .from('resources')
+        .select('*')
+        .order('title_en', { ascending: true });
+      if (error) throw new AppError('internal_error', 'Something went wrong.');
+      return (data ?? []) as AdminResource[];
+    },
+
+    async saveResource({ id, expectedVersion, fields }) {
+      if (id === null) {
+        const { data, error } = await supabase
+          .from('resources')
+          .insert({ ...fields, user_id: userId })
+          .select('id, version')
+          .single();
+        if (error || !data) throw new AppError('validation_failed', 'That resource could not be saved.');
+        return { id: data.id, version: data.version };
+      }
+
+      // The version predicate is the conflict check: a stale form does not match,
+      // so the newer row survives untouched rather than being overwritten (UTIL-01).
+      const { data, error } = await supabase
+        .from('resources')
+        .update({ ...fields, version: (expectedVersion ?? 0) + 1 })
+        .eq('id', id)
+        .eq('version', expectedVersion)
+        .select('id, version')
+        .maybeSingle();
+      if (error || !data) {
+        throw new AppError('version_conflict', 'This changed somewhere else. Reload before saving.');
+      }
+      return { id: data.id, version: data.version };
+    },
+
+    async listFacts(): Promise<AdminFact[]> {
+      const { data, error } = await supabase
+        .from('facts')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw new AppError('internal_error', 'Something went wrong.');
+
+      const now = new Date();
+      return (data ?? []).map((row) => {
+        const reason = eligibilityReason(row as never, now);
+        return {
+          ...(row as unknown as AdminFact),
+          eligible: reason === 'eligible',
+          ineligible_reason: reason === 'eligible' ? null : reason,
+        };
+      });
+    },
+
+    async saveFact({ id, expectedVersion, fields }) {
+      if (id === null) {
+        const { data, error } = await supabase
+          .from('facts')
+          .insert({ ...fields, user_id: userId })
+          .select('id, version')
+          .single();
+        if (error || !data) throw new AppError('validation_failed', 'That fact could not be saved.');
+        return { id: data.id, version: data.version };
+      }
+
+      const { data, error } = await supabase
+        .from('facts')
+        .update({ ...fields, version: (expectedVersion ?? 0) + 1 })
+        .eq('id', id)
+        .eq('version', expectedVersion)
+        .select('id, version')
+        .maybeSingle();
+      if (error || !data) {
+        throw new AppError('version_conflict', 'This changed somewhere else. Reload before saving.');
+      }
+      return { id: data.id, version: data.version };
+    },
+
+    async getSettings(): Promise<AdminSettings> {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('target_linkedin, target_x, target_threads, timezone')
+        .maybeSingle();
+      return (
+        (data as AdminSettings | null) ?? {
+          target_linkedin: APP.defaultDailyTarget,
+          target_x: APP.defaultDailyTarget,
+          target_threads: APP.defaultDailyTarget,
+          timezone: APP.defaultTimezone,
+        }
+      );
+    },
+
+    async saveSettings(settings) {
+      const { error } = await supabase
+        .from('app_settings')
+        .upsert({ ...settings, user_id: userId }, { onConflict: 'user_id' });
+      if (error) throw new AppError('validation_failed', 'Those settings could not be saved.');
+      return settings;
     },
   };
 }

@@ -1,10 +1,9 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * Foundation smoke only (SR-001). The real journeys — source to history to
- * resources to three ideas to edit to copy to record — arrive with the workspace
- * in SR-014 onwards. This file exists so the browser job runs something real
- * rather than reporting a green "0 tests" result.
+ * Foundation smoke. The real journeys live in `reply-journey.spec.ts`; this file
+ * checks the two things that are true before any feature works: the production
+ * build serves, and a private response is never cacheable.
  */
 
 test('the production build serves the app and a private health endpoint', async ({ page, request }) => {
@@ -14,7 +13,7 @@ test('the production build serves the app and a private health endpoint', async 
   expect(await health.json()).toEqual({ status: 'ok' });
 
   await page.goto('/');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Social Replies');
+  await expect(page.getByRole('link', { name: 'Social Replies' })).toBeVisible();
 });
 
 test('the narrow workspace width does not scroll horizontally', async ({ page }) => {

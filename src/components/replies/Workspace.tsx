@@ -9,6 +9,7 @@ import { ResourcesSection } from './ResourcesSection';
 import { IdeasSection } from './IdeasSection';
 import { FinalReplyEditor } from './FinalReplyEditor';
 import { ActionStrip } from './ActionStrip';
+import { AddPastReplyDialog } from './AddPastReplyDialog';
 import { Button } from './primitives';
 import { EDITOR, MANUAL } from '@/lib/workspace/copy';
 import { initialState, isEditedSinceCopy, workspaceReducer } from '@/lib/workspace/reducer';
@@ -46,11 +47,13 @@ export function Workspace({
   const [busy, setBusy] = useState(false);
   const [refining, setRefining] = useState(false);
   const [showManual, setShowManual] = useState(false);
+  const [sourceExpanded, setSourceExpanded] = useState(false);
   const router = useRouter();
 
   const generationAbort = useRef<AbortController | null>(null);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const operationKey = useRef<string | null>(null);
+  const manualTrigger = useRef<HTMLButtonElement>(null);
 
   const draftHash = useMemo(() => contentHash(state.draft), [state.draft]);
 
@@ -276,6 +279,22 @@ export function Workspace({
 
   const onUseIdea = useCallback((idea: ReplyIdea) => dispatch({ type: 'use_idea', idea }), []);
 
+  const loadMoreHistory = useCallback(async () => {
+    if (!state.history.nextCursor) return;
+    try {
+      const page = await api.librarySearch({
+        query: state.sourceText,
+        cursor: state.history.nextCursor,
+        limit: 5,
+        include_unknown_dates: true,
+      });
+      // Paging never touches the editor or the current selection (D05).
+      dispatch({ type: 'history_page', items: page.items, nextCursor: page.next_cursor });
+    } catch {
+      // Failing to fetch more leaves what is already on screen exactly as it is.
+    }
+  }, [state.history.nextCursor, state.sourceText]);
+
   const onAddResource = useCallback(
     (resource: QualifiedResource) => {
       const insertion = resource.url
@@ -301,18 +320,18 @@ export function Workspace({
           parentText={state.parentText}
           sourceUrl={state.sourceUrl}
           busy={busy}
-          collapsed={state.sessionId !== null}
+          collapsed={state.sessionId !== null && !sourceExpanded}
           onPlatformChange={(platform) => dispatch({ type: 'set_platform', platform })}
           onTargetKindChange={(targetKind) => dispatch({ type: 'set_target_kind', targetKind })}
           onFieldChange={(field, value) => dispatch({ type: 'edit_source', field, value })}
           onSubmit={analyse}
-          onExpandToggle={() => undefined}
+          onExpandToggle={() => setSourceExpanded((value) => !value)}
         />
 
         <PastRepliesSection
           section={state.history}
           onRetry={analyse}
-          onMore={() => undefined}
+          onMore={loadMoreHistory}
           onUse={(reply) => {
             if (state.sessionId) {
               void runGeneration(state.sessionId, state.sourceVersion, state.contextVersion, [reply.id]);
@@ -369,7 +388,7 @@ export function Workspace({
         />
 
         <div className="mb-4">
-          <Button variant="quiet" onClick={() => setShowManual(true)}>
+          <Button variant="quiet" ref={manualTrigger} onClick={() => setShowManual(true)}>
             {MANUAL.trigger}
           </Button>
           <a href="#your-reply" className="ml-3 text-meta text-ink-soft underline">
@@ -391,11 +410,16 @@ export function Workspace({
       />
 
       {showManual ? (
-        <div role="dialog" aria-modal="true" aria-label={MANUAL.heading} className="sr-only">
-          {/* The dialog itself is SR-018 work. The trigger exists here so the
-              workspace's own focus handling can be tested alongside it. */}
-          <Button onClick={() => setShowManual(false)}>{MANUAL.cancel}</Button>
-        </div>
+        <AddPastReplyDialog
+          platform={state.platform}
+          onClose={() => {
+            setShowManual(false);
+            // Focus returns to the control that opened the dialog, so a keyboard
+            // user is not dropped back at the top of the page (D13).
+            manualTrigger.current?.focus();
+          }}
+          onSaved={(progress) => dispatch({ type: 'progress_refreshed', progress })}
+        />
       ) : null}
     </>
   );

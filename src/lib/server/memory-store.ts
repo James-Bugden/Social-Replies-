@@ -6,6 +6,9 @@ import { AppError } from '@/lib/contracts/errors';
 import type { PastReply, Progress, QualifiedResource, ReplyIdea } from '@/lib/contracts/api';
 import type { Platform, Provenance } from '@/lib/contracts/vocabulary';
 import type {
+  AdminFact,
+  AdminResource,
+  AdminSettings,
   AnalyseInput,
   AnalyseResult,
   GenerationRunInput,
@@ -61,6 +64,18 @@ interface MemoryResource {
   active: boolean;
   verified: boolean;
   cta: string;
+}
+
+interface MemoryFact {
+  id: string;
+  version: number;
+  fact_text: string;
+  tags: string[];
+  approved: boolean;
+  sensitivity: 'public_safe' | 'private_context_only';
+  active: boolean;
+  valid_from: string | null;
+  valid_to: string | null;
 }
 
 interface MutationRecord {
@@ -181,6 +196,14 @@ export function createMemoryStore(): Store {
   const sessions = new Map<string, SessionRow & { sourceText: string; parentText: string | null }>();
   const mutations = new Map<string, MutationRecord>();
   const runs: { id: string; sessionId: string; createdAt: number }[] = [];
+  const facts: MemoryFact[] = [];
+  const analyseKeys = new Map<string, string>();
+  let settings: AdminSettings = {
+    target_linkedin: APP.defaultDailyTarget,
+    target_x: APP.defaultDailyTarget,
+    target_threads: APP.defaultDailyTarget,
+    timezone: APP.defaultTimezone,
+  };
   const suggestions = new Map<string, ReplyIdea[]>();
 
   function toPastReply(reply: MemoryReply): PastReply {
@@ -197,9 +220,26 @@ export function createMemoryStore(): Store {
     };
   }
 
+  /**
+   * English stopwords, dropped before matching.
+   *
+   * Postgres full-text search drops these, so a double that keeps them is more
+   * lenient than production: a query of pure nonsense would still "match" every
+   * reply containing the word "the", and a journey asserting the no-match state
+   * would pass for the wrong reason. A test double that is kinder than the real
+   * thing is worse than no double at all.
+   */
+  const STOPWORDS = new Set([
+    'the', 'and', 'that', 'for', 'with', 'you', 'your', 'are', 'was', 'this', 'but',
+    'not', 'all', 'any', 'can', 'has', 'have', 'from', 'they', 'what', 'when', 'who',
+    'how', 'why', 'its', 'about', 'into', 'than', 'then', 'there', 'their', 'them',
+  ]);
+
   function lexicalMatches(query: string, includeAiDrafts: boolean): MemoryReply[] {
     const needle = searchText(query);
-    const terms = needle.split(' ').filter((t) => t.length > 2);
+    const terms = needle
+      .split(' ')
+      .filter((t) => t.length > 2 && !STOPWORDS.has(t));
 
     return replies
       .filter((reply) => reply.withdrawnAt === null)
@@ -208,7 +248,8 @@ export function createMemoryStore(): Store {
         const hay = reply.searchText;
         const hits = terms.filter((term) => hay.includes(term)).length;
         // Chinese has no spaces, so a substring check is the only signal that works.
-        const substring = needle.length >= 2 && hay.includes(needle.slice(0, 6)) ? 1 : 0;
+        // Whole-phrase containment, which is the signal that finds Chinese.
+        const substring = needle.length >= 2 && hay.includes(needle) ? 1 : 0;
         return { reply, score: hits + substring };
       })
       .filter((scored) => scored.score > 0)
@@ -298,21 +339,32 @@ export function createMemoryStore(): Store {
     },
 
     async analyse(input: AnalyseInput): Promise<AnalyseResult> {
-      const sessionId = randomUUID();
-      sessions.set(sessionId, {
-        id: sessionId,
-        platform: input.platform,
-        source_post_id: null,
-        source_version: 1,
-        editor_version: 0,
-        draft_text: '',
-        draft_hash: contentHash(''),
-        state: 'draft',
-        english_meaning: null,
-        meaning_source_hash: null,
-        sourceText: input.sourceText,
-        parentText: input.parentText,
-      });
+      // A replayed key returns the session that already exists, untouched. Writing
+      // a fresh one over it would reset the editor version and throw away whatever
+      // the owner had already typed, which is the opposite of what idempotency is
+      // for.
+      const replayedId = analyseKeys.get(input.requestKey);
+      const existing = replayedId ? sessions.get(replayedId) : undefined;
+      const sessionId = existing?.id ?? randomUUID();
+
+      if (!existing) {
+        analyseKeys.set(input.requestKey, sessionId);
+        sessions.set(sessionId, {
+          id: sessionId,
+          platform: input.platform,
+          source_post_id: null,
+          source_version: 1,
+          editor_version: 0,
+          draft_text: '',
+          draft_hash: contentHash(''),
+          state: 'draft',
+          english_meaning: null,
+          meaning_source_hash: null,
+          sourceText: input.sourceText,
+          parentText: input.parentText,
+        });
+      }
+      const session = sessions.get(sessionId)!;
 
       const matches = lexicalMatches(input.sourceText, false);
       const qualified = qualifyResources(input.sourceText, input.platform);
@@ -320,9 +372,9 @@ export function createMemoryStore(): Store {
       return {
         sessionId,
         sourcePostId: null,
-        sourceVersion: 1,
+        sourceVersion: session.source_version,
         contextVersion: 1,
-        editorVersion: 0,
+        editorVersion: session.editor_version,
         history: {
           state: matches.length > 0 ? 'ready' : 'empty',
           items: matches.slice(0, RETRIEVAL.initialResults).map(toPastReply),
@@ -549,7 +601,121 @@ export function createMemoryStore(): Store {
     },
 
     async hasEligibleFacts() {
-      return false;
+      return facts.some((f) => f.approved && f.active && f.sensitivity === 'public_safe');
+    },
+
+    async listResources(): Promise<AdminResource[]> {
+      return SEED_RESOURCES.map((r) => ({
+        id: r.id,
+        version: r.version,
+        type: r.type,
+        ownership: r.ownership,
+        title_en: r.title,
+        title_zh_tw: null,
+        description: r.description,
+        tags: r.tags,
+        aliases: [],
+        canonical_path: r.ownership === 'own' ? '/guides/cover-letters' : null,
+        zh_tw_path: null,
+        external_url: r.url && r.ownership === 'book' ? r.url : null,
+        cta_en: r.cta,
+        cta_zh_tw: null,
+        allowed_platforms: r.allowedPlatforms,
+        access_notes: null,
+        active: r.active,
+        verified: r.verified,
+      }));
+    },
+
+    async saveResource({ id, expectedVersion, fields }) {
+      const existing = SEED_RESOURCES.find((r) => r.id === id);
+      if (id !== null && !existing) throw new AppError('not_found', 'That is not available.');
+      if (existing && existing.version !== expectedVersion) {
+        throw new AppError('version_conflict', 'This changed somewhere else. Reload before saving.');
+      }
+      const target = existing ?? {
+        id: randomUUID(),
+        version: 0,
+        type: 'guide' as const,
+        ownership: 'own' as const,
+        title: '',
+        url: null,
+        tags: [],
+        description: '',
+        allowedPlatforms: ['linkedin', 'x', 'threads'] as Platform[],
+        active: true,
+        verified: false,
+        cta: '',
+      };
+      if (!existing) SEED_RESOURCES.push(target);
+
+      target.version += 1;
+      if (typeof fields.title_en === 'string') target.title = fields.title_en;
+      if (typeof fields.description === 'string') target.description = fields.description;
+      if (Array.isArray(fields.tags)) target.tags = fields.tags as string[];
+      if (typeof fields.active === 'boolean') target.active = fields.active;
+      if (typeof fields.cta_en === 'string') target.cta = fields.cta_en;
+
+      return { id: target.id, version: target.version };
+    },
+
+    async listFacts(): Promise<AdminFact[]> {
+      return facts.map((f) => {
+        const eligible = f.approved && f.active && f.sensitivity === 'public_safe';
+        return {
+          ...f,
+          eligible,
+          ineligible_reason: eligible
+            ? null
+            : !f.approved
+              ? 'not_approved'
+              : !f.active
+                ? 'inactive'
+                : 'private_only',
+        };
+      });
+    },
+
+    async saveFact({ id, expectedVersion, fields }) {
+      const existing = facts.find((f) => f.id === id);
+      if (id !== null && !existing) throw new AppError('not_found', 'That is not available.');
+      if (existing && existing.version !== expectedVersion) {
+        throw new AppError('version_conflict', 'This changed somewhere else. Reload before saving.');
+      }
+
+      const target: MemoryFact = existing ?? {
+        id: randomUUID(),
+        version: 0,
+        fact_text: '',
+        tags: [],
+        // A new fact is unapproved and private. Creating one is not approving it.
+        approved: false,
+        sensitivity: 'private_context_only',
+        active: true,
+        valid_from: null,
+        valid_to: null,
+      };
+      if (!existing) facts.push(target);
+
+      target.version += 1;
+      if (typeof fields.fact_text === 'string') target.fact_text = fields.fact_text;
+      if (Array.isArray(fields.tags)) target.tags = fields.tags as string[];
+      if (typeof fields.approved === 'boolean') target.approved = fields.approved;
+      if (fields.sensitivity === 'public_safe' || fields.sensitivity === 'private_context_only') {
+        target.sensitivity = fields.sensitivity;
+      }
+      if (typeof fields.active === 'boolean') target.active = fields.active;
+
+      return { id: target.id, version: target.version };
+    },
+
+    async getSettings() {
+      return settings;
+    },
+
+    async saveSettings(next) {
+      settings = { ...next };
+      return settings;
     },
   };
 }

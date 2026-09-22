@@ -39,6 +39,12 @@ export interface SessionRow {
 }
 
 export interface AnalyseInput {
+  /**
+   * Stable per press of Get reply ideas. A second press with the same key reuses
+   * the session it already created rather than leaving an orphan behind, which is
+   * what makes a double click harmless rather than merely cheap.
+   */
+  requestKey: string;
   platform: Platform;
   targetKind: TargetKind;
   sourceText: string;
@@ -182,4 +188,69 @@ export interface Store {
 
   /** Whether at least one approved, active, current, public-safe fact exists. */
   hasEligibleFacts(): Promise<boolean>;
+
+  // --- Administration (SR-018) -------------------------------------------
+  // Deliberately small. This is maintenance for a registry and a fact bank,
+  // not a content management product: list, save, disable, and a version check
+  // so a stale form cannot overwrite a newer edit.
+
+  listResources(): Promise<AdminResource[]>;
+  saveResource(input: {
+    id: string | null;
+    expectedVersion: number | null;
+    fields: Record<string, unknown>;
+  }): Promise<{ id: string; version: number }>;
+
+  listFacts(): Promise<AdminFact[]>;
+  saveFact(input: {
+    id: string | null;
+    expectedVersion: number | null;
+    fields: Record<string, unknown>;
+  }): Promise<{ id: string; version: number }>;
+
+  getSettings(): Promise<AdminSettings>;
+  saveSettings(settings: AdminSettings): Promise<AdminSettings>;
+}
+
+export interface AdminResource {
+  id: string;
+  version: number;
+  type: 'guide' | 'tool' | 'article' | 'book';
+  ownership: 'own' | 'book';
+  title_en: string;
+  title_zh_tw: string | null;
+  description: string;
+  tags: string[];
+  aliases: string[];
+  canonical_path: string | null;
+  zh_tw_path: string | null;
+  external_url: string | null;
+  cta_en: string | null;
+  cta_zh_tw: string | null;
+  allowed_platforms: Platform[];
+  access_notes: string | null;
+  active: boolean;
+  verified: boolean;
+}
+
+export interface AdminFact {
+  id: string;
+  version: number;
+  fact_text: string;
+  tags: string[];
+  approved: boolean;
+  sensitivity: 'public_safe' | 'private_context_only';
+  active: boolean;
+  valid_from: string | null;
+  valid_to: string | null;
+  /** Derived, so the screen can say *why* a fact is not usable (C06). */
+  eligible: boolean;
+  ineligible_reason: string | null;
+}
+
+export interface AdminSettings {
+  target_linkedin: number;
+  target_x: number;
+  target_threads: number;
+  timezone: string;
 }

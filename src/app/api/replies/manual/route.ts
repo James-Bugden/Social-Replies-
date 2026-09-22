@@ -1,7 +1,8 @@
-import { ownerRoute, unwrapRpc } from '@/lib/server/owner-route';
+import { ownerRoute } from '@/lib/server/owner-route';
+import { getStore } from '@/lib/server/get-store';
 import { jsonResponse, readJson } from '@/lib/server/http';
 import { AppError } from '@/lib/contracts/errors';
-import { manualReplyRequestSchema, progressSchema, type Progress } from '@/lib/contracts/api';
+import { manualReplyRequestSchema, progressSchema } from '@/lib/contracts/api';
 import { contentHash, payloadFingerprint, searchText } from '@/lib/contracts/text';
 import { publicConfig, serverConfig } from '@/lib/config/env';
 
@@ -36,36 +37,32 @@ export const POST = ownerRoute(async (request, { session }) => {
   const embeddingModel =
     serverConfig().embedding.mode === 'live' ? serverConfig().embedding.model : 'unconfigured';
 
-  const result = unwrapRpc<{ reply_id: string; replayed: boolean; recorded_at: string }>(
-    await session.supabase.rpc('record_manual_reply', {
-      p_operation_key: operationKey,
-      p_fingerprint: fingerprint,
-      p_platform: body.platform,
-      p_final_text: body.final_text,
-      p_content_hash: contentHash(body.final_text),
-      p_search_text: searchText(body.final_text),
-      p_date_precision: body.date_precision,
-      p_posted_at: body.posted_at ?? null,
-      p_posted_date: body.posted_date ?? null,
-      p_source_timezone: body.source_timezone ?? null,
-      p_source_text: body.source_text ?? null,
-      p_parent_text: body.parent_text ?? null,
-      p_source_url: body.source_url ?? null,
-      p_reply_url: body.reply_url ?? null,
-      p_embedding_model: embeddingModel,
-    }),
-  );
+  const store = getStore(session);
 
-  const progress = progressSchema.parse(
-    unwrapRpc<Progress>(
-      await session.supabase.rpc('daily_counts', { p_timezone: publicConfig().timezone }),
-    ),
-  );
+  const result = await store.recordManualReply({
+    operationKey,
+    fingerprint,
+    platform: body.platform,
+    finalText: body.final_text,
+    contentHash: contentHash(body.final_text),
+    searchText: searchText(body.final_text),
+    datePrecision: body.date_precision,
+    postedAt: body.posted_at ?? null,
+    postedDate: body.posted_date ?? null,
+    sourceTimezone: body.source_timezone ?? null,
+    sourceText: body.source_text ?? null,
+    parentText: body.parent_text ?? null,
+    sourceUrl: body.source_url ?? null,
+    replyUrl: body.reply_url ?? null,
+    embeddingModel,
+  });
+
+  const progress = progressSchema.parse(await store.dailyCounts(publicConfig().timezone));
 
   return jsonResponse({
-    reply_id: result.reply_id,
+    reply_id: result.replyId,
     replayed: result.replayed,
-    recorded_at: result.recorded_at,
+    recorded_at: result.recordedAt,
     progress,
     embedding_status: embeddingModel === 'unconfigured' ? 'unavailable' : 'queued',
   });
