@@ -106,6 +106,24 @@ describe('error identity survives module duplication', () => {
   });
 });
 
+describe('test-only routes cannot exist in production', () => {
+  it('every route under api/test checks the test-mode switch first', () => {
+    const routes = trackedFiles('src/app/api/test/', ['.ts']);
+    // If this list is ever empty the test is vacuous, so say so rather than pass.
+    expect(routes.length).toBeGreaterThan(0);
+
+    for (const file of routes) {
+      const source = read(file);
+      expect(source.includes('isTestMode'), `${file} does not check test mode`).toBe(true);
+      // A 404 rather than a 403: an unrouted path is what a production deployment
+      // should look like, not a locked door that advertises there is a room.
+      expect(source.includes('404') || source.includes('status: 404'), `${file} does not 404`).toBe(
+        true,
+      );
+    }
+  });
+});
+
 describe('the service-role key never reaches a request', () => {
   it('no route or component reads SUPABASE_SECRET_KEY', () => {
     const offenders = trackedFiles('src/', ['.ts', '.tsx']).filter((file) =>

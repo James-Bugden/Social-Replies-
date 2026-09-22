@@ -1,6 +1,19 @@
 import { test, expect } from '@playwright/test';
 
 /**
+ * Each journey starts from a known store.
+ *
+ * The in-memory double is a singleton, so without this a test that creates a fact
+ * or disables a resource changes the world every later test runs in, and the
+ * second viewport project inherits everything the first one did. That passes when
+ * a file is run alone and fails in CI, which is the worst way to find out.
+ */
+test.beforeEach(async ({ request }) => {
+  await request.post('/api/test/reset');
+});
+
+
+/**
  * The four utility pages (SR-018).
  *
  * Library, Resources, Facts and Settings are not the product's main loop, but they

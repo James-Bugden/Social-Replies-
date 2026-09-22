@@ -147,7 +147,15 @@ const SEED_REPLIES: Omit<MemoryReply, 'id' | 'recordedAt'>[] = [
   },
 ];
 
-const SEED_RESOURCES: MemoryResource[] = [
+/**
+ * Seeds are a template, never the live rows.
+ *
+ * `createMemoryStore` copies these. Using the module array directly would mean a
+ * reset handed back a "fresh" store over data a previous test had already edited,
+ * so a suite would pass file by file and fail as a whole, which is exactly the
+ * shape of bug the reset exists to remove.
+ */
+const SEED_RESOURCES: readonly MemoryResource[] = [
   {
     id: '55555555-5555-4555-8555-000000000001',
     version: 1,
@@ -196,6 +204,11 @@ export function createMemoryStore(): Store {
   const sessions = new Map<string, SessionRow & { sourceText: string; parentText: string | null }>();
   const mutations = new Map<string, MutationRecord>();
   const runs: { id: string; sessionId: string; createdAt: number }[] = [];
+  const resources: MemoryResource[] = SEED_RESOURCES.map((seed) => ({
+    ...seed,
+    tags: [...seed.tags],
+    allowedPlatforms: [...seed.allowedPlatforms],
+  }));
   const facts: MemoryFact[] = [];
   const analyseKeys = new Map<string, string>();
   let settings: AdminSettings = {
@@ -259,7 +272,7 @@ export function createMemoryStore(): Store {
 
   function qualifyResources(query: string, platform: Platform): QualifiedResource[] {
     const needle = searchText(query);
-    return SEED_RESOURCES.filter((r) => r.active && r.verified && r.allowedPlatforms.includes(platform))
+    return resources.filter((r) => r.active && r.verified && r.allowedPlatforms.includes(platform))
       .filter((r) => r.tags.some((tag) => needle.includes(tag)) || needle.includes(searchText(r.title)))
       .slice(0, RESOURCE_LIMITS.maxQualified)
       .map((r) => ({
@@ -605,7 +618,7 @@ export function createMemoryStore(): Store {
     },
 
     async listResources(): Promise<AdminResource[]> {
-      return SEED_RESOURCES.map((r) => ({
+      return resources.map((r) => ({
         id: r.id,
         version: r.version,
         type: r.type,
@@ -628,7 +641,7 @@ export function createMemoryStore(): Store {
     },
 
     async saveResource({ id, expectedVersion, fields }) {
-      const existing = SEED_RESOURCES.find((r) => r.id === id);
+      const existing = resources.find((r) => r.id === id);
       if (id !== null && !existing) throw new AppError('not_found', 'That is not available.');
       if (existing && existing.version !== expectedVersion) {
         throw new AppError('version_conflict', 'This changed somewhere else. Reload before saving.');
@@ -647,7 +660,7 @@ export function createMemoryStore(): Store {
         verified: false,
         cta: '',
       };
-      if (!existing) SEED_RESOURCES.push(target);
+      if (!existing) resources.push(target);
 
       target.version += 1;
       if (typeof fields.title_en === 'string') target.title = fields.title_en;

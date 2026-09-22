@@ -18,7 +18,7 @@ npm run lint           clean
 npm run check:private  clean
 npm run check:secrets  clean
 npm test               436 passed (29 files)
-npm run test:e2e       54 passed across narrow-600 and wide-1280
+npm run test:e2e       58 passed across narrow-600 and wide-1280
 ```
 
 ## What this campaign cannot tell you
@@ -164,4 +164,6 @@ that a later reader can tell a decision from an oversight.
 | Self-review after that refactor | The retrieval tests still imported the old inline builders, so they would have stayed green while the production path went untested | The builders delegate to the same functions, so there is one definition |
 | Browser journeys | The page and the API received different instances of the in-memory test double, because Next bundles server components and route handlers separately | The double is held on `globalThis` |
 | A browser journey, via a log line that did not exist | **`instanceof AppError` is false across Turbopack chunks.** Next gives a server component and a route handler separate copies of the module, so an error thrown inside a store the *page* constructed is not `instanceof` the class a *route* imports. Every deliberate 409, 401 and 429 raised on that path collapsed into an unexplained 500. It looked fine under curl, because a curl request constructed the store from a route chunk | `AppError` carries a `Symbol.for` brand, which is the same brand in every copy, and `isAppError` replaces every `instanceof`. A boundary test forbids the old form. `toErrorResponse` now logs unexpected failures with a request id, because a 500 that leaves no trace is what made this expensive to find |
+| CI, not a local run | **The browser journeys were order-dependent.** The test double is a singleton shared by both viewport projects, so the second inherited every fact created and every resource disabled by the first. Worse, its seed resources were a module-level array that `saveResource` mutated, so even a reset handed back a "fresh" store over edited data. Each file passed alone and the suite failed as a whole | Each journey resets through a route that 404s outside `SR_TEST_MODE=e2e`, and the store copies its seeds per instance. A boundary test asserts every route under `api/test` checks the switch, and fails if that directory is ever empty rather than passing over nothing |
+| CI, not a local run | The action strip height assertion read once, but the measurement is written by a ResizeObserver that fires after the paint. It raced | The assertion polls |
 | Browser journeys | The test double kept English stopwords, so a nonsense query still matched every reply containing "the". A no-match assertion would have passed for the wrong reason | The double drops stopwords, as Postgres full-text search does |

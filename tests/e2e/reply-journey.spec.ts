@@ -1,6 +1,19 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /**
+ * Each journey starts from a known store.
+ *
+ * The in-memory double is a singleton, so without this a test that creates a fact
+ * or disables a resource changes the world every later test runs in, and the
+ * second viewport project inherits everything the first one did. That passes when
+ * a file is run alone and fails in CI, which is the worst way to find out.
+ */
+test.beforeEach(async ({ request }) => {
+  await request.post('/api/test/reset');
+});
+
+
+/**
  * The journey the product exists for (T1).
  *
  * Paste a post, see what you wrote before and what you could share, choose among
@@ -310,17 +323,21 @@ test.describe('the action strip reserves its own height (D01)', () => {
       });
     }
 
-    const before = await bottomIsReachable();
-    expect(before.reserved).toBeGreaterThan(0);
-    expect(Math.abs(before.reserved - before.height)).toBeLessThanOrEqual(2);
+    // The measurement is written by a ResizeObserver, which fires after the paint
+    // that changed the height. Reading once races it, so poll until the reserved
+    // space matches what is on screen.
+    const matches = async () => {
+      const { reserved, height } = await bottomIsReachable();
+      return reserved > 0 && Math.abs(reserved - height) <= 2;
+    };
+
+    await expect.poll(matches, { timeout: 5_000 }).toBe(true);
 
     // Recording swaps the strip for Undo and Next reply, which is a different
     // height. The reserved space has to follow it.
     await page.getByRole('button', { name: 'Mark posted' }).click();
     await expect(page.getByText(/Saved\./)).toBeVisible();
 
-    const after = await bottomIsReachable();
-    expect(after.reserved).toBeGreaterThan(0);
-    expect(Math.abs(after.reserved - after.height)).toBeLessThanOrEqual(2);
+    await expect.poll(matches, { timeout: 5_000 }).toBe(true);
   });
 });
