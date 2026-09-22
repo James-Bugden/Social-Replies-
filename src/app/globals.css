@@ -1,0 +1,82 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens for Social Replies (D02).
+ *
+ * Accessibility adaptation, recorded here because D02 requires it to be documented:
+ * the brand hairline --sr-hairline (#E7E3D8) is ~1.15:1 against paper and cannot carry
+ * an input boundary or a focus ring. Inputs use --sr-border-input (#8C8677, ~3.1:1 on
+ * paper) and focus uses --sr-focus (#0A3F2C, ~11:1 on paper). Gold is decorative only:
+ * it is never the sole carrier of state and is never used for small body text.
+ */
+@theme {
+  --color-paper: #fdfbf7;
+  --color-paper-alt: #f4f1e9;
+  --color-card: #ffffff;
+  --color-ink: #0e0e0e;
+  --color-ink-soft: #5c5c5c;
+  --color-green: #0a3f2c;
+  --color-green-hover: #072e20;
+  --color-green-soft: #e5efea;
+  --color-hairline: #e7e3d8;
+  --color-border-input: #8c8677;
+  --color-gold: #b08a3e;
+  --color-danger: #8a2b1f;
+
+  --font-sans: var(--sr-font-ui), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-cjk: 'Noto Sans TC', var(--sr-font-ui), 'PingFang TC', 'Microsoft JhengHei',
+    'Hiragino Sans', ui-sans-serif, system-ui, sans-serif;
+
+  --text-meta: 0.8125rem; /* 13px metadata (D01) */
+  --text-reply: 1rem; /* 16px reply body (D01) */
+}
+
+:root {
+  --sr-gutter: 16px;
+  --sr-card-padding: 12px;
+  /* Replaced at runtime with the measured action-strip height (D01). */
+  --sr-action-strip-height: 0px;
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Chinese needs a looser line-height than the Latin UI (D01). */
+.sr-cjk,
+[lang='zh-TW'],
+[lang='zh-Hant'] {
+  font-family: var(--font-cjk);
+  line-height: 1.6;
+}
+
+/* Counters use tabular numerals so 9/10 and 11/10 do not shift (D02). */
+.sr-tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* One visible focus treatment everywhere; never colour alone (D13). */
+:where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-green);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
