@@ -141,6 +141,38 @@ claims or editing burden, and none should be made.
 The release gate of zero observed unsupported facts or URLs on the evaluation set
 is therefore **not met**, because the set does not exist. That is a gap, not a pass.
 
+## What the adversarial round found after all of this was green
+
+Four refuting lenses ran over the whole branch after the suite reported 437 unit
+tests and 58 browser journeys passing: end-to-end chain, privacy and auth abuse,
+test integrity by mutation, and claims against evidence. Each finding was then
+verified by a separate agent that tried to refute it.
+
+**Twenty-two defects were confirmed.** That is the argument for running this round
+at all: every one of them survived a green suite, and several survived because the
+test that was supposed to catch them could not fail.
+
+Rows in this ledger that were wrong, and are now corrected below: UX-03 claimed
+drafts survive navigation, SEC-02 claimed same-origin enforcement was unit-covered
+when no test imported it, RET-04 cited a browser journey that executed zero
+assertions, and ZH-01 claimed the staleness guard was verified in the browser when
+the guard could not fire.
+
+The five that would have shown the owner something untrue:
+
+1. **Undo recorded status was a no-op.** Press it, believe the recording is
+   reversed, and nothing moves.
+2. **The English meaning staleness guard could never fire**, because the value it
+   compared was captured before the text changed. The English of replaced Chinese
+   displayed as current, on the screen whose only job is checking what is about to
+   be posted.
+3. **Leaving the workspace destroyed the reply**, while a comment, D14 and this
+   ledger all said otherwise.
+4. **Refine output bypassed every guard**, so a rewrite could carry an invented
+   figure or a raw URL straight into the editor.
+5. **Every displayed date was the UTC date**, so a reply posted at 00:30 Taipei was
+   counted as today and displayed as yesterday.
+
 ## Accepted hosted advisor findings
 
 Run after the last migration. The `anon` finding that started this list is gone.
