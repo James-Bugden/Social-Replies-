@@ -1,0 +1,6 @@
+# Deterministic bytes. Exact-text acceptance tests depend on LF line endings.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
