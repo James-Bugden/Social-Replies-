@@ -76,6 +76,36 @@ describe('the typecheck gate is not blind to any source file', () => {
   }, 180_000);
 });
 
+describe('error identity survives module duplication', () => {
+  it('nothing uses instanceof on AppError', () => {
+    // Next hands a server component and a route handler separate copies of the
+    // same module, so `instanceof` compares against the wrong class object and
+    // quietly turns a deliberate 409 into an unexplained 500. A branded symbol
+    // is the same brand in every copy; `isAppError` is the only safe check.
+    const offenders = trackedFiles('src/', ['.ts', '.tsx']).filter((file) =>
+      /instanceof\s+AppError/.test(read(file).replace(/\/\*[\s\S]*?\*\//g, '')),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it('an AppError from a different module copy is still recognised', async () => {
+    const { AppError, isAppError } = await import('@/lib/contracts/errors');
+
+    expect(isAppError(new AppError('version_conflict', 'x'))).toBe(true);
+    expect(isAppError(new Error('plain'))).toBe(false);
+    expect(isAppError(null)).toBe(false);
+
+    // A hand-built object carrying the same registered brand passes, which is
+    // exactly the cross-chunk case: same brand, different class object.
+    const fromAnotherCopy = Object.assign(new Error('from elsewhere'), {
+      [Symbol.for('social-replies.AppError')]: true,
+      code: 'version_conflict',
+    });
+    expect(isAppError(fromAnotherCopy)).toBe(true);
+    expect(fromAnotherCopy instanceof AppError).toBe(false);
+  });
+});
+
 describe('the service-role key never reaches a request', () => {
   it('no route or component reads SUPABASE_SECRET_KEY', () => {
     const offenders = trackedFiles('src/', ['.ts', '.tsx']).filter((file) =>

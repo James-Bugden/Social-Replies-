@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AppError,
+  isAppError,
   GENERIC_MESSAGE,
   codeForSqlState,
   isRetryable,
@@ -135,7 +136,7 @@ interface PostgresErrorLike {
  * are the owner's private writing.
  */
 export function toErrorResponse(error: unknown, requestId = randomUUID()): NextResponse {
-  if (error instanceof AppError) {
+  if (isAppError(error)) {
     return errorResponse(error.code, error.message, {
       requestId,
       ...(error.retryAfterSeconds ? { retryAfterSeconds: error.retryAfterSeconds } : {}),
@@ -149,10 +150,33 @@ export function toErrorResponse(error: unknown, requestId = randomUUID()): NextR
   const candidate = error as PostgresErrorLike;
   if (typeof candidate?.code === 'string') {
     const code = codeForSqlState(candidate.code);
+    if (code === 'internal_error') logUnexpected(error, requestId);
     return errorResponse(code, undefined, { requestId });
   }
 
+  logUnexpected(error, requestId);
   return errorResponse('internal_error', undefined, { requestId });
+}
+
+/**
+ * The one place an unexpected failure is recorded.
+ *
+ * Returning a generic 500 to the caller is right: a database message can name
+ * another record's existence. Returning it and writing nothing anywhere is not.
+ * An unexplained 500 with no trace cost most of an afternoon to diagnose once,
+ * which is the whole argument for this function.
+ *
+ * The request id ties the log line to what the owner saw. The name and stack say
+ * where it happened. The message is deliberately excluded: it is the part most
+ * likely to quote a row, and C10 keeps writing bodies out of logs.
+ */
+function logUnexpected(error: unknown, requestId: string): void {
+  const details =
+    error instanceof Error
+      ? { name: error.name, at: error.stack?.split(String.fromCharCode(10))[1]?.trim() ?? 'unknown' }
+      : { name: typeof error, at: 'unknown' };
+
+  console.error(`[${requestId}] unhandled ${details.name} at ${details.at}`);
 }
 
 /**

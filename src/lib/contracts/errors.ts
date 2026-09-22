@@ -66,11 +66,27 @@ export function isRetryable(code: ErrorCode): boolean {
 }
 
 /**
+ * Identity that survives module duplication.
+ *
+ * `instanceof` compares against one class object, and a bundler can hand two
+ * chunks two copies of the same module. Next does exactly that: a server
+ * component and a route handler get separate copies, so an AppError thrown inside
+ * a store built by a page is not `instanceof` the AppError a route imports. The
+ * check silently fails and a deliberate 409 becomes an unexplained 500.
+ *
+ * `Symbol.for` looks up a process-wide registry rather than a module scope, so a
+ * branded property is the same brand in every copy. Use `isAppError`, never
+ * `instanceof AppError`; a boundary test enforces that.
+ */
+const APP_ERROR_BRAND = Symbol.for('social-replies.AppError');
+
+/**
  * An error that carries a code the API layer can map without parsing text.
  *
  * `message` is written for the owner, not for a log grep: it appears in the UI.
  */
 export class AppError extends Error {
+  readonly [APP_ERROR_BRAND] = true;
   readonly code: ErrorCode;
   readonly retryAfterSeconds?: number;
 
@@ -91,6 +107,10 @@ export class AppError extends Error {
  * Anything unrecognised becomes `internal_error`: a database message is never
  * forwarded to the client, because it can name another record's existence.
  */
+export function isAppError(error: unknown): error is AppError {
+  return typeof error === 'object' && error !== null && APP_ERROR_BRAND in error;
+}
+
 export function codeForSqlState(sqlState: string | undefined): ErrorCode {
   switch (sqlState) {
     case 'SR401':

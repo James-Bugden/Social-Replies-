@@ -17,8 +17,8 @@ npm run typecheck      clean
 npm run lint           clean
 npm run check:private  clean
 npm run check:secrets  clean
-npm test               see per-row counts
-npm run test:e2e       38 passed across narrow-600 and wide-1280
+npm test               436 passed (29 files)
+npm run test:e2e       54 passed across narrow-600 and wide-1280
 ```
 
 ## What this campaign cannot tell you
@@ -54,11 +54,11 @@ repeated as an excuse in each row.
 
 | ID | Result | Evidence and limits |
 |---|---|---|
-| IMP-01 | *see importer section below* | |
-| IMP-02 | *see importer section below* | |
-| IMP-03 | **pass** (counter half) | The counter half is proven independently: a year-old reply imported today does not appear in today's count, an unknown date never counts, and a date-only record whose source timezone is not the counting timezone is excluded because its Taipei day is unproven |
-| IMP-04 | *see importer section below* | |
-| IMP-05 | *see importer section below* | |
+| IMP-01 | **pass** | Rerunning a completed batch restarts from ordinal 0 rather than trusting the checkpoint, so every record is re-identified: a checkpoint that skipped the work would make the import *look* idempotent without testing whether it is. A native reply id arriving from a second export reconciles into one record keeping both source references and the stronger proven status |
+| IMP-02 | **pass** | Identical wording under two different target posts stays two records. Proven by mutation: adding a `content_hash` lookup to the duplicate check made this fail |
+| IMP-03 | **pass** | Unknown, date-only-unzoned, known-UTC and a year-old archive imported today, proven against `public.daily_counts`. An unknown date never counts and a date-only record whose source timezone is not the counting timezone is excluded, because its Taipei day is unproven. Proven by mutation: defaulting an unknown date to the import clock made IMP-03 and IMP-05 fail |
+| IMP-04 | **pass** | Malformed CSV and JSONL with surviving neighbours, a JavaScript archive wrapper, an unknown schema, path traversal, a symlink entry, an executable entry, an oversize file, a decompression bomb, and an interrupted batch resumed from its checkpoint. The JavaScript wrapper case asserts a `globalThis` marker is untouched **first**, so an early return cannot skip the assertion that matters |
+| IMP-05 | **pass** | A source with no parent text and no publication proof keeps null context and honest provenance, with no promotion from `ai_draft` to posted |
 
 ## Retrieval
 
@@ -113,7 +113,7 @@ repeated as an excuse in each row.
 
 | ID | Result | Evidence and limits |
 |---|---|---|
-| UTIL-01 | *see utilities section below* | |
+| UTIL-01 | **pass** | Resource and fact create, edit and disable; a stale `expected_version` shows a conflict and the typed text survives; a fact created through the interface comes back unapproved and marked excluded from generation; a private-only fact stays excluded even once approved and active; disabling a resource removes it from what a new reply can offer; every navigation link reaches a page that renders |
 | DEP-01 | **pending** | No deployment exists. The procedure is in `docs/ops/deployment.md` |
 | DEP-02 | **pending** | Requires a promoted build |
 
@@ -163,4 +163,5 @@ that a later reader can tell a decision from an oversight.
 | Integration | Retrieval SQL assembled in TypeScript could never run in production, because PostgREST has no raw-SQL channel | Two Postgres functions, called by SQL from the harness and by `rpc()` from the app |
 | Self-review after that refactor | The retrieval tests still imported the old inline builders, so they would have stayed green while the production path went untested | The builders delegate to the same functions, so there is one definition |
 | Browser journeys | The page and the API received different instances of the in-memory test double, because Next bundles server components and route handlers separately | The double is held on `globalThis` |
+| A browser journey, via a log line that did not exist | **`instanceof AppError` is false across Turbopack chunks.** Next gives a server component and a route handler separate copies of the module, so an error thrown inside a store the *page* constructed is not `instanceof` the class a *route* imports. Every deliberate 409, 401 and 429 raised on that path collapsed into an unexplained 500. It looked fine under curl, because a curl request constructed the store from a route chunk | `AppError` carries a `Symbol.for` brand, which is the same brand in every copy, and `isAppError` replaces every `instanceof`. A boundary test forbids the old form. `toErrorResponse` now logs unexpected failures with a request id, because a 500 that leaves no trace is what made this expensive to find |
 | Browser journeys | The test double kept English stopwords, so a nonsense query still matched every reply containing "the". A no-match assertion would have passed for the wrong reason | The double drops stopwords, as Postgres full-text search does |

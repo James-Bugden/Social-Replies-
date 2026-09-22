@@ -208,15 +208,11 @@ export const LIBRARY = {
   correctConflict: 'This changed somewhere else. Reload this entry before correcting it again.',
   correctFailed: "Couldn't save the correction. Your text is still here.",
   withdraw: 'Withdraw recorded status',
-  withdrawHeading: 'Withdraw this recorded reply?',
   withdrawHint:
     "This changes this app's record only. It does not delete or edit the reply on the social platform itself.",
   withdrawConfirm: 'Withdraw',
   withdrawCancel: 'Cancel',
-  withdrawnPill: 'Withdrawn',
-  restore: 'Restore recorded status',
   withdrawSaved: 'Withdrawn from your recorded replies.',
-  restoreSaved: 'Restored.',
   withdrawFailed: "Couldn't update this reply. Try again.",
 } as const;
 
