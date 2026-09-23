@@ -2,6 +2,7 @@ import { getStore } from '@/lib/server/get-store';
 import { configurationStatus } from '@/lib/config/env';
 import { resolvePageSession, loadProgress, PageShell, SignedOutPage } from '@/components/admin/session';
 import { SettingsForm } from '@/components/admin/SettingsForm';
+import { SignOutButton } from '@/components/admin/SignOutButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,7 @@ export default async function SettingsPage() {
   return (
     <PageShell progress={progress}>
       <SettingsForm initial={settings} status={status} />
+      <SignOutButton />
     </PageShell>
   );
 }

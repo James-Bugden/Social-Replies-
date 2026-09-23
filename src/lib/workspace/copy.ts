@@ -307,6 +307,12 @@ export const ADMIN = {
  */
 export const SETTINGS = {
   heading: 'Settings',
+  signOutHeading: 'This device',
+  signOut: 'Sign out',
+  // Said out loud because it is the reason the control exists, and because a
+  // draft disappearing without warning would otherwise look like data loss.
+  signOutNote: 'Signing out clears the reply saved in this tab. Your saved replies stay.',
+  signOutFailed: 'You are signed out on this device. The server did not confirm it, so sign out again elsewhere if you were signed in there.',
   targetsHeading: 'Daily targets',
   targetLinkedin: 'LinkedIn target',
   targetX: 'X target',

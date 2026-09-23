@@ -20,7 +20,11 @@ import type { Platform, TargetKind } from '@/lib/contracts/vocabulary';
  *   * it never holds a token, a fact, a retrieved reply or an imported archive.
  *     Just the text in the box and enough context to put it back.
  *
- * It is cleared on Next reply, on an explicit discard, and on sign-out.
+ * It is cleared on Next reply and on sign-out. An earlier version of this comment
+ * also claimed "an explicit discard", and there is no such control; sign-out did
+ * not exist either until SEC-05 was checked rather than read. A comment that
+ * asserts a security behaviour nothing implements answers the exact question a
+ * reviewer came to ask, wrongly.
  */
 
 const KEY = 'social-replies.draft.v1';
