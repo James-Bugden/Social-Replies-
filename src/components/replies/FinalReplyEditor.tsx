@@ -2,6 +2,7 @@
 
 import { useRef } from 'react';
 import { Button, Card, Meta, ReplyText, SectionHeading, StatusLine } from './primitives';
+import { FormatToolbar } from './FormatToolbar';
 import { EDITOR, MEANING } from '@/lib/workspace/copy';
 import { needsEnglishMeaning, type Platform } from '@/lib/contracts/vocabulary';
 import type { MeaningState, ProposalState } from '@/lib/workspace/reducer';
@@ -51,16 +52,20 @@ export const FINAL_EDITOR_ID = 'final-reply-editor';
 export function FinalReplyEditor(props: FinalReplyEditorProps) {
   const editorId = FINAL_EDITOR_ID;
   const composing = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chinese = needsEnglishMeaning(props.platform);
 
   return (
     <section aria-labelledby="editor-heading" className="mb-4" id="your-reply">
       <SectionHeading id="editor-heading">{EDITOR.heading}</SectionHeading>
 
+      <FormatToolbar textarea={textareaRef} text={props.draft} platform={props.platform} onChange={props.onChange} />
+
       <label htmlFor={editorId} className="sr-only">
         {EDITOR.label}
       </label>
       <textarea
+        ref={textareaRef}
         id={editorId}
         value={props.draft}
         placeholder={EDITOR.placeholder}

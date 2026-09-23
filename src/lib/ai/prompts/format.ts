@@ -13,5 +13,5 @@ export const PLATFORM_FORMAT_RULES = [
   'The text is posted exactly as written on a platform that does not render markdown.',
   'So: no asterisks or underscores for emphasis, no # headings, no [text](link) links,',
   'no code formatting and no horizontal rules. Separate paragraphs with a blank line.',
-  'For a list, put each item on its own line starting with "- ".',
+  'For a list, put each item on its own line starting with "• ".',
 ].join('\n');

@@ -286,6 +286,33 @@ test.describe('reply text shows the way it will be posted', () => {
     // And nothing a platform would show as a literal markup character.
     expect(copied).not.toMatch(/\*\*|^#{1,6} |\]\(/m);
   });
+
+  test('bold from the toolbar reaches the clipboard as letters a platform displays', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/');
+
+    const editor = page.getByRole('textbox', { name: 'Your reply' });
+    await editor.fill('Ask for the range first');
+    // Select "range", then press Bold.
+    await editor.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(12, 17));
+    await page
+      .getByRole('toolbar', { name: 'Formatting' })
+      .getByRole('button', { name: 'Bold', exact: true })
+      .click();
+
+    // Mathematical sans-serif bold "range": what LinkedIn shows as bold text.
+    const bold = '\u{1D5FF}\u{1D5EE}\u{1D5FB}\u{1D5F4}\u{1D5F2}';
+    await expect(editor).toHaveValue(`Ask for the ${bold} first`);
+
+    await page.getByRole('button', { name: 'Copy reply' }).click();
+    await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible();
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied).toBe(`Ask for the ${bold} first`);
+    expect(copied).not.toContain('*');
+  });
 });
 
 test.describe('honest states', () => {

@@ -40,7 +40,7 @@ describe('generated ideas', () => {
     if (!parsed.ok) return;
     const first = parsed.value.ideas.find((i) => i.position === 0)!;
     expect(first.angle_label).toBe('Shorter');
-    expect(first.reply_text).toBe('Short answer: yes.\n\n- ask for the range\n- then anchor');
+    expect(first.reply_text).toBe('Short answer: yes.\n\n• ask for the range\n• then anchor');
     expect(first.english_meaning).toBe('Short answer');
     expect(first.cta_text).toBe('See the guide');
   });

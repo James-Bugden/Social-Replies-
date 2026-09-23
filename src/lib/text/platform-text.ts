@@ -11,7 +11,7 @@
  * Owner text with a trailing space or a literal asterisk stays exactly as typed.
  *
  * What survives is the formatting every platform actually shows: line breaks,
- * blank lines between paragraphs, hyphen and numbered lists, emoji. Link targets
+ * blank lines between paragraphs, bullet and numbered lists, emoji. Link targets
  * are dropped and their text kept, because a URL in a reply is the application's
  * job (C06), and a markdown link is just a URL the model tried to smuggle past it.
  *
@@ -34,7 +34,9 @@ export function toPlatformText(input: string): string {
         : line
         .replace(/^(\s*)#{1,6}\s+/, '$1') // headings
         .replace(/^(\s*)>\s?/, '$1') // block quotes
-        .replace(/^(\s*)[*+]\s+/, '$1- '), // asterisk and plus bullets
+        // Every markdown bullet becomes a real bullet character, matching what
+        // the formatting toolbar inserts, so one reply never mixes the two.
+        .replace(/^(\s*)[-*+]\s+/, '$1• '),
     )
     .join('\n');
 

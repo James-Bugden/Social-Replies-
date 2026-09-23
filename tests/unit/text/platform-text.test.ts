@@ -36,12 +36,12 @@ describe('structure', () => {
     expect(toPlatformText('## Three things\nFirst point')).toBe('Three things\nFirst point');
   });
 
-  it('turns asterisk and plus bullets into plain hyphen lines, and leaves hyphens alone', () => {
-    expect(toPlatformText('* one\n+ two\n- three')).toBe('- one\n- two\n- three');
+  it('turns every markdown bullet into a real bullet, matching the formatting toolbar', () => {
+    expect(toPlatformText('* one\n+ two\n- three')).toBe('• one\n• two\n• three');
   });
 
   it('keeps a bullet whose text is emphasised', () => {
-    expect(toPlatformText('* **Numbers** first')).toBe('- Numbers first');
+    expect(toPlatformText('* **Numbers** first')).toBe('• Numbers first');
   });
 
   it('keeps numbered lists, which read fine as written', () => {
