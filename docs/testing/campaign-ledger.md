@@ -40,11 +40,27 @@ request failing to arrive.
 Four gaps run through every row below. They are listed once here rather than
 repeated as an excuse in each row.
 
-1. **No pgvector locally.** PGlite has no vector extension, so the vector column,
-   the HNSW index, `semantic.ts` and `applyVector` have **never executed** in any
-   test. Retrieval is verified lexically only. This is survivable because lexical
-   search is the floor rather than a fallback, but any claim about semantic
-   ranking quality is currently unfounded.
+1. **No pgvector locally, and no rows anywhere.** PGlite has no vector extension,
+   so nothing in the local suite touches the vector column, the HNSW index,
+   `semantic.ts` or `applyVector`. Retrieval is verified lexically only.
+
+   Three parts of that were checked directly against hosted Postgres on
+   2026-09-23 and are no longer unknown. pgvector is installed in the
+   `extensions` schema, which is what `semantic.ts` casts to, so the
+   `$1::extensions.vector` in that file resolves rather than being the kind of
+   SQL that could never run -- a bug this project has already had once, in the
+   retrieval builders. The column is `vector(1536)` and the HNSW index
+   `search_documents_embedding_cosine` exists. The app's semantic query shape
+   plans successfully against the live schema, and the `<=>` operator with the
+   `1 - distance` score returns 1.0000, 0.7071 and 0.0000 for vectors chosen to
+   produce exactly those, in the right order.
+
+   What that is **not**: the query has still never run against a real row. Both
+   `search_documents` and `reply_library` cascade from `auth.users`, which is
+   empty, and populating it would mean creating an account. So the HNSW index has
+   never served a query, `applyVector` has never executed, and **any claim about
+   semantic ranking quality remains unfounded.** The operator arithmetic is
+   confirmed; the retrieval is not.
 2. **No live model.** Every generation test uses the fake adapter. The guards,
    budgets and failure paths are real; the *output quality*, the Taiwan Chinese
    fluency and the injection resistance of an actual model are not measured.
@@ -80,7 +96,7 @@ repeated as an excuse in each row.
 |---|---|---|
 | RET-01 | **pass** (lexical) | 40-row synthetic bilingual corpus. English, Traditional Chinese, short-keyword and cross-language queries all return relevant older writing. The anti-recency case is constructed so that a recency-first ordering would return something different, and asserts the counterfactual. Cursor pages are stable with no duplicates, and a cursor from a different query is rejected rather than interleaved. **Semantic ranking is unverified** |
 | RET-02 | **pass** | A reply saved while the embedder is `unconfigured` is lexically findable immediately; the job survives; the save is never rolled back by an embedding failure |
-| RET-03 | **partial** | A stale job cannot overwrite a newer correction, proven at the pre-check. The atomic `and text_hash = ...` guard inside the UPDATE has **never executed**, because applying a vector requires pgvector. Withdrawn and ineligible rows are filtered before candidate selection, not after |
+| RET-03 | **partial** | A stale job cannot overwrite a newer correction, proven at the pre-check. The atomic `and text_hash = ...` guard inside the UPDATE has **never executed**, because applying a vector requires pgvector and the hosted database has no rows to apply one to. Confirmed on hosted Postgres that the type, column, index and operator the guard depends on all exist and behave, which removes "the feature is impossible here" as an explanation but leaves the guard itself untested. Withdrawn and ineligible rows are filtered before candidate selection, not after |
 | RET-04 | **pass** | A history containing only AI drafts returns empty rather than "you replied before"; drafts and main posts carry their true provenance to the UI; a component test asserts the confirmed heading appears only when every row is a confirmed reply |
 
 ## Resources and facts
