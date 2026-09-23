@@ -270,6 +270,29 @@ describe('ideas: no empty placeholders on failure (D07)', () => {
     based_on_reply_ids: [],
   });
 
+  it('says it is empty rather than rendering a bare heading', () => {
+    // Found by the T2 visual review, not by any test: `idle` is a real state in
+    // IdeasState and IdeasSection had no branch for it, so before the owner
+    // presses the button the section is a heading with nothing under it. Both
+    // sections above it explain their own emptiness, and this component's own
+    // docstring argues that a card-shaped hole wrongly implies text is coming.
+    // A heading with nothing under it makes the same promise.
+    render(
+      <IdeasSection
+        state={{ status: 'idle' }}
+        platform="linkedin"
+        resources={[]}
+        onUse={noop}
+        onRetry={noop}
+      />,
+    );
+
+    expect(screen.getByText('No reply ideas yet.')).toBeTruthy();
+    // Still no placeholder cards, and no retry for something never attempted.
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+  });
+
   it('shows an actionable retry rather than three empty cards', () => {
     render(
       <IdeasSection

@@ -17,7 +17,7 @@ npm run typecheck      clean
 npm run lint           clean
 npm run check:private  clean
 npm run check:secrets  clean
-npm test               558 passed (37 files)
+npm test               559 passed (37 files)
 npm run test:e2e       68 passed across narrow-600 and wide-1280
 ```
 
@@ -155,6 +155,39 @@ claims or editing burden, and none should be made.
 The release gate of zero observed unsupported facts or URLs on the evaluation set
 is therefore **not met**, because the set does not exist. That is a gap, not a pass.
 
+## T2 visual and copy review
+
+Done on 2026-09-23 by actually looking at the running app in a browser at 600 px,
+in test mode, rather than by reading the DOM. That distinction is the point of
+T2, and it earned its keep immediately.
+
+**One defect found, which every automated check had passed over.** `IdeasState`
+has four states and `IdeasSection` rendered three of them. `idle` had no branch,
+so from page load until the owner pressed the button the Reply ideas section was
+a heading with nothing underneath it. Both sections above it explain their own
+emptiness (`No matching past replies yet.`, `Nothing worth linking for this
+one.`), and the component's own docstring argues that a card-shaped hole wrongly
+implies text is coming. A heading over nothing makes the same promise. Fixed
+with `No reply ideas yet.`, matching the two siblings, and covered by a test
+that was watched failing first.
+
+No suite could have caught this. Every existing ideas test constructs a
+`loading`, `failed` or `ready` state, because those are the states a test author
+thinks to write. Nobody renders the state the component starts in.
+
+**One thing that looked wrong and was not.** `Your reply` appears twice in the
+accessibility tree, as an `h2` and again as a `label`. The label is `sr-only`,
+so this is a visible heading for navigation plus an accessible name for the
+field, which is the correct pattern. Checking before changing it is the only
+reason it is still correct.
+
+**What this review did not cover.** Wide desktop was attempted and abandoned: the
+preview pane could not render a faithful 1280 px viewport, scaling it into an
+800 px frame instead, so no visual judgement about wide layout is recorded here.
+The browser journeys do assert no horizontal overflow at 1280, which is a
+different and weaker claim than having looked at it. Chinese rendering, real IME
+behaviour and physical devices remain T3/T4 and remain undone.
+
 ## What the adversarial round found after all of this was green
 
 Four refuting lenses ran over the whole branch after the suite reported 437 unit
@@ -221,4 +254,5 @@ that a later reader can tell a decision from an oversight.
 | A browser journey, via a log line that did not exist | **`instanceof AppError` is false across Turbopack chunks.** Next gives a server component and a route handler separate copies of the module, so an error thrown inside a store the *page* constructed is not `instanceof` the class a *route* imports. Every deliberate 409, 401 and 429 raised on that path collapsed into an unexplained 500. It looked fine under curl, because a curl request constructed the store from a route chunk | `AppError` carries a `Symbol.for` brand, which is the same brand in every copy, and `isAppError` replaces every `instanceof`. A boundary test forbids the old form. `toErrorResponse` now logs unexpected failures with a request id, because a 500 that leaves no trace is what made this expensive to find |
 | CI, not a local run | **The browser journeys were order-dependent.** The test double is a singleton shared by both viewport projects, so the second inherited every fact created and every resource disabled by the first. Worse, its seed resources were a module-level array that `saveResource` mutated, so even a reset handed back a "fresh" store over edited data. Each file passed alone and the suite failed as a whole | Each journey resets through a route that 404s outside `SR_TEST_MODE=e2e`, and the store copies its seeds per instance. A boundary test asserts every route under `api/test` checks the switch, and fails if that directory is ever empty rather than passing over nothing |
 | CI, not a local run | The action strip height assertion read once, but the measurement is written by a ResizeObserver that fires after the paint. It raced | The assertion polls |
+| T2 visual review | The Reply ideas section rendered nothing at all in its `idle` state, so it was a bare heading until the owner pressed the button, while both sections above it explained their emptiness | `IDEAS.idle` added and rendered; regression test watched failing first |
 | Browser journeys | The test double kept English stopwords, so a nonsense query still matched every reply containing "the". A no-match assertion would have passed for the wrong reason | The double drops stopwords, as Postgres full-text search does |

@@ -67,6 +67,9 @@ export const RESOURCES = {
 
 export const IDEAS = {
   heading: 'Reply ideas',
+  // Said plainly, in the same shape as the two sections above this one, because
+  // a heading with nothing under it reads as something that failed to load.
+  idle: 'No reply ideas yet.',
   loading: 'Drafting reply ideas...',
   failed: "Couldn't create reply ideas. Your draft is unchanged.",
   rateLimited: 'Reply ideas are temporarily paused. Your draft is unchanged.',

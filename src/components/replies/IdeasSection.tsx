@@ -15,7 +15,9 @@ import type { IdeasState } from '@/lib/workspace/reducer';
  * highlighted one quietly makes that choice for them.
  *
  * On failure there are no empty placeholder cards. A card-shaped hole implies the
- * text is coming; a sentence and a retry button say what actually happened.
+ * text is coming; a sentence and a retry button say what actually happened. The
+ * same argument applies before anything is asked for, which is why `idle` says so
+ * rather than leaving the heading alone over nothing.
  */
 
 function IdeaCard({
@@ -82,6 +84,10 @@ export function IdeasSection({ state, platform, resources, onUse, onRetry }: Ide
   return (
     <section aria-labelledby="ideas-heading" className="mb-4">
       <SectionHeading id="ideas-heading">{IDEAS.heading}</SectionHeading>
+
+      {/* `idle` is a real state and went unrendered, so the section was a bare
+          heading until the owner pressed the button. */}
+      {state.status === 'idle' ? <StatusLine>{IDEAS.idle}</StatusLine> : null}
 
       {state.status === 'loading' ? <StatusLine>{IDEAS.loading}</StatusLine> : null}
 
