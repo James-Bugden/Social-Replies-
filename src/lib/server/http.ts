@@ -5,6 +5,8 @@ import { z } from 'zod';
 import {
   AppError,
   isAppError,
+  looksLikeSqlState,
+  recoverAppErrorCode,
   GENERIC_MESSAGE,
   codeForSqlState,
   isRetryable,
@@ -161,7 +163,7 @@ interface PostgresErrorLike {
  * messages name constraints, columns and sometimes values, and this app's rows
  * are the owner's private writing.
  */
-export function toErrorResponse(error: unknown, requestId = randomUUID()): NextResponse {
+export function toErrorResponse(error: unknown, requestId: string = randomUUID()): NextResponse {
   if (isAppError(error)) {
     return errorResponse(error.code, error.message, {
       requestId,
@@ -173,10 +175,34 @@ export function toErrorResponse(error: unknown, requestId = randomUUID()): NextR
     return errorResponse('validation_failed', error.issues[0]?.message, { requestId });
   }
 
+  // An AppError that arrived without its brand. Worth answering correctly, and
+  // worth logging loudly: it means something upstream is producing errors this
+  // process cannot identify, which is exactly the condition that once turned
+  // every deliberate 409 into a 500.
+  const recovered = recoverAppErrorCode(error);
+  if (recovered) {
+    logUnexpected(error, requestId, 'unbranded AppError');
+    return errorResponse(recovered, undefined, { requestId });
+  }
+
   const candidate = error as PostgresErrorLike;
   if (typeof candidate?.code === 'string') {
+    // Only a SQLSTATE-shaped string is read as a SQLSTATE. Treating *any* string
+    // `code` as one is half of how a deliberate 409 became a silent 500: an
+    // AppError carries a `code` too, so `version_conflict` went to the SQLSTATE
+    // mapper, matched nothing, and defaulted to internal_error.
+    //
+    // The two cases are also different problems, and the log says which. An
+    // unmapped SQLSTATE means the database did something this app has not
+    // accounted for. An unrecognised code means an error arrived from somewhere
+    // whose conventions this app does not know at all.
+    if (!looksLikeSqlState(candidate.code)) {
+      logUnexpected(error, requestId, 'unrecognised error code, not a SQLSTATE');
+      return errorResponse('internal_error', undefined, { requestId });
+    }
+
     const code = codeForSqlState(candidate.code);
-    if (code === 'internal_error') logUnexpected(error, requestId);
+    if (code === 'internal_error') logUnexpected(error, requestId, 'unmapped SQLSTATE');
     return errorResponse(code, undefined, { requestId });
   }
 
@@ -196,13 +222,15 @@ export function toErrorResponse(error: unknown, requestId = randomUUID()): NextR
  * where it happened. The message is deliberately excluded: it is the part most
  * likely to quote a row, and C10 keeps writing bodies out of logs.
  */
-function logUnexpected(error: unknown, requestId: string): void {
+function logUnexpected(error: unknown, requestId: string, note?: string): void {
   const details =
     error instanceof Error
       ? { name: error.name, at: error.stack?.split(String.fromCharCode(10))[1]?.trim() ?? 'unknown' }
       : { name: typeof error, at: 'unknown' };
 
-  console.error(`[${requestId}] unhandled ${details.name} at ${details.at}`);
+  console.error(
+    `[${requestId}] unhandled ${details.name}${note ? ` (${note})` : ''} at ${details.at}`,
+  );
 }
 
 /**

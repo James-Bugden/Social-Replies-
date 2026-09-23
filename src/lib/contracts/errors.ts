@@ -107,6 +107,45 @@ export class AppError extends Error {
   }
 }
 
+export function isAppError(error: unknown): error is AppError {
+  return typeof error === 'object' && error !== null && APP_ERROR_BRAND in error;
+}
+
+/**
+ * A last-resort structural match for an error that lost its brand.
+ *
+ * The brand survives module duplication, which is the failure this app actually
+ * hit. It would not survive an error crossing a worker boundary, being serialised
+ * and revived, or a future bundler doing something new. This recognises the shape
+ * instead, so the next variant of that problem degrades to the right status code
+ * rather than to a 500 that reads as a crash.
+ *
+ * It returns the code only. The message is deliberately not trusted from an
+ * unbranded object, because the one thing a generic envelope must never do is
+ * forward text from an error whose provenance is unknown.
+ */
+export function recoverAppErrorCode(error: unknown): ErrorCode | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const candidate = error as { name?: unknown; code?: unknown };
+  if (candidate.name !== 'AppError' || typeof candidate.code !== 'string') return null;
+  const parsed = errorCodeSchema.safeParse(candidate.code);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * Whether a string is shaped like a SQLSTATE at all.
+ *
+ * Postgres SQLSTATEs are exactly five characters from A to Z and 0 to 9. This
+ * exists because the classifier used to treat *any* string `code` as one, and an
+ * AppError carries a `code` too. When the brand check failed, `version_conflict`
+ * was fed to the SQLSTATE mapper, matched nothing, and fell through to
+ * `internal_error`. That is how a deliberate 409 became an unexplained 500: not
+ * one bug but two, the second of which turned the first into silence.
+ */
+export function looksLikeSqlState(value: string): boolean {
+  return /^[A-Z0-9]{5}$/.test(value);
+}
+
 /**
  * Maps the user-defined SQLSTATEs raised by the recording functions, plus the
  * standard ones worth distinguishing, onto envelope codes.
@@ -114,10 +153,6 @@ export class AppError extends Error {
  * Anything unrecognised becomes `internal_error`: a database message is never
  * forwarded to the client, because it can name another record's existence.
  */
-export function isAppError(error: unknown): error is AppError {
-  return typeof error === 'object' && error !== null && APP_ERROR_BRAND in error;
-}
-
 export function codeForSqlState(sqlState: string | undefined): ErrorCode {
   switch (sqlState) {
     case 'SR401':
