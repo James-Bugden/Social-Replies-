@@ -174,7 +174,8 @@ not read off a dashboard.
 | URL | `https://social-replies.vercel.app` |
 | Commit | `17d1c10` on `main`, deployment `dpl_A7xzzVK8n4kUG89tKK628FFtH14k` |
 | Production settings | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `APP_TIMEZONE`. Nothing else |
-| Preview settings | **None, deliberately.** C01 wants previews off production data, and on a public repository it also means no pull-request build ever receives them |
+| Preview settings | **None for any branch except `demo`.** C01 wants previews off production data, and on a public repository it also means no pull-request build ever receives them |
+| Demo | `https://social-replies-git-demo-james-projects-1242b366.vercel.app`, built from the `demo` branch. Four settings scoped to that branch alone: `SR_TEST_MODE=e2e`, `AI_PROVIDER=fake`, `EMBEDDING_PROVIDER=fake`, `APP_TIMEZONE`. It runs the in-memory double with synthetic seed data and placeholder ideas, holds no credentials and touches no database. Behind Vercel's own login, so only team members can open it. Its data lives in server memory and can vanish whenever Vercel starts a fresh instance; it is for trying the flow, not for keeping anything |
 | Deliberately unset | `SR_TEST_MODE` (selects the in-memory double and skips auth), `AI_PROVIDER` (`fake` is accepted in production and would show placeholder text as real ideas; unset, the ideas section says it is not set up), `EMBEDDING_PROVIDER`, `RESOURCE_BASE_URL` (the resolver refuses to guess) |
 
 What a signed-out stranger gets, measured the same day:
