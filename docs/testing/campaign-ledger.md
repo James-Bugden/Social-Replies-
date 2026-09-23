@@ -175,6 +175,14 @@ No suite could have caught this. Every existing ideas test constructs a
 `loading`, `failed` or `ready` state, because those are the states a test author
 thinks to write. Nobody renders the state the component starts in.
 
+The same class of fault was then looked for everywhere else rather than left as
+one anecdote. Each discriminated union in the reducer was compared against the
+branches its component actually renders. `FinalReplyEditor` covers all five of
+its states. `ActionStrip` appears to skip `idle`, but does not: idle is the
+resting presentation, the two buttons and the line beneath them, so there is
+nothing unsaid. `IdeasSection` was the only component with a state that reached
+the screen as silence.
+
 **One thing that looked wrong and was not.** `Your reply` appears twice in the
 accessibility tree, as an `h2` and again as a `label`. The label is `sr-only`,
 so this is a visible heading for navigation plus an accessible name for the
