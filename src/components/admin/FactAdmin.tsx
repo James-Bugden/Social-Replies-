@@ -1,7 +1,7 @@
 'use client';
 
 import { useId, useState } from 'react';
-import { Button, Card, Meta, Pill, SectionHeading, StatusLine } from '@/components/replies/primitives';
+import { Button, Card, Meta, Pill, ReplyText, SectionHeading, StatusLine } from '@/components/replies/primitives';
 import { ADMIN } from '@/lib/workspace/copy';
 import { factSensitivitySchema } from '@/lib/contracts/vocabulary';
 import type { AdminFact } from '@/lib/server/store';
@@ -333,9 +333,7 @@ export function FactAdmin({ initial }: { initial: AdminFact[] }) {
                   ) : null}
                 </div>
 
-                <p className={isChinese ? 'sr-cjk text-reply' : 'text-reply'} {...(isChinese ? { lang: 'zh-TW' } : {})}>
-                  {fact.fact_text}
-                </p>
+                <ReplyText text={fact.fact_text} chinese={isChinese} />
 
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Button

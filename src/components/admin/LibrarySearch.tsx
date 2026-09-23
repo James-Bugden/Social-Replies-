@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Button, Card, Meta, Pill, SectionHeading, StatusLine, cx } from '@/components/replies/primitives';
+import { Button, Card, Meta, Pill, ReplyText, SectionHeading, StatusLine, cx } from '@/components/replies/primitives';
 import { LIBRARY } from '@/lib/workspace/copy';
 import { PLATFORM_LABELS, provenanceSchema, type Platform, type Provenance } from '@/lib/contracts/vocabulary';
 import type { PastReply } from '@/lib/contracts/api';
@@ -136,9 +136,7 @@ function Row({
         </Pill>
       </div>
 
-      <p className={isChinese ? 'sr-cjk text-reply' : 'text-reply'} {...(isChinese ? { lang: 'zh-TW' } : {})}>
-        {row.expanded ? reply.full_text : reply.excerpt}
-      </p>
+      <ReplyText text={row.expanded ? reply.full_text : reply.excerpt} chinese={isChinese} />
 
       <div className="mt-2 flex flex-wrap gap-2">
         {reply.full_text.length > reply.excerpt.length ? (

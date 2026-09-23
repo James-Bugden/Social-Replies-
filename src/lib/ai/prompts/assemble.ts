@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { loadVoiceRules, platformRules } from './voice';
+import { PLATFORM_FORMAT_RULES } from './format';
 import { needsEnglishMeaning } from '@/lib/contracts/vocabulary';
 import type { GenerationContext } from '../types';
 
@@ -22,8 +23,11 @@ export interface AssembledPrompt {
   promptVersion: string;
 }
 
-/** Bumped whenever the assembly below changes in a way that could move output. */
-const PROMPT_TEMPLATE_VERSION = 'p3';
+/**
+ * Bumped whenever the assembly below changes in a way that could move output.
+ * p4: explicit platform formatting rules, replacing a bare "plain text".
+ */
+const PROMPT_TEMPLATE_VERSION = 'p4';
 
 function fence(nonce: string, label: string, body: string): string {
   return `<${label} id="${nonce}">\n${body}\n</${label} id="${nonce}">`;
@@ -71,6 +75,7 @@ export function assemblePrompt(
     'reply_text is plain text ready to post. Never put a URL in it: if a supplied',
     'resource genuinely fits, set resource_id to that resource id and leave the link to',
     'the application. A resource id you were not given is a failure.',
+    PLATFORM_FORMAT_RULES,
     '',
     'uses_fact_ids lists the supplied facts a reply actually relies on. Only the text of',
     'a supplied fact may become a first-person claim, and the reply must not say more',

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Button, Card, Meta, Pill, SectionHeading, StatusLine } from './primitives';
+import { Button, Card, Meta, Pill, ReplyText, SectionHeading, StatusLine } from './primitives';
 import { IDEAS } from '@/lib/workspace/copy';
 import { needsEnglishMeaning, type Platform } from '@/lib/contracts/vocabulary';
 import type { ReplyIdea, QualifiedResource } from '@/lib/contracts/api';
@@ -45,12 +45,7 @@ function IdeaCard({
         {idea.resource_id && resourceTitle ? <Meta>{IDEAS.includes(resourceTitle)}</Meta> : null}
       </div>
 
-      <p
-        className={chinese ? 'sr-cjk text-reply' : 'text-reply'}
-        {...(chinese ? { lang: 'zh-TW' } : {})}
-      >
-        {idea.reply_text}
-      </p>
+      <ReplyText text={idea.reply_text} chinese={chinese} />
 
       {chinese && idea.english_meaning ? (
         <div className="mt-2">
