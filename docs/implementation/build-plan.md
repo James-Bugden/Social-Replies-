@@ -32,6 +32,16 @@ provisioned, and is separate from the `gettheoffer` production project. C01 requ
 project, which this satisfies, at no additional cost and with no risk to production data. Reversible:
 if the owner wants a dedicated project later, the migrations apply to any empty Postgres.
 
+**D-01a. The same migrations are applied to the hosted project, not only locally.**
+Local verification proves logic; it cannot prove platform configuration. Applying
+migration 2 to the hosted project and reading its security advisor found a real
+defect that every local test had passed: Supabase's default privileges grant
+`anon` EXECUTE on each new function in `public`, and a direct grant to `anon` is
+not removed by revoking from `PUBLIC`. `public.is_app_owner()` was therefore
+callable without signing in. Fixed by revoking `anon` by name on every function,
+and the local harness now reproduces Supabase's default privileges so the guard
+test is real rather than vacuous.
+
 **D-02. Local database verification uses PGlite, not Docker.** There is no Docker runtime on this
 machine, so `supabase start` cannot run. Migrations and RLS policies are verified against PGlite
 with a small `auth` schema shim that supplies `auth.uid()`, the `anon`/`authenticated` roles and
