@@ -249,6 +249,45 @@ test.describe('keyboard and input method', () => {
   });
 });
 
+test.describe('reply text shows the way it will be posted', () => {
+  test('a paragraph break survives from the idea card to the editor to the clipboard', async ({
+    page,
+    context,
+  }) => {
+    // Every read-only view used to render reply text in a plain paragraph, which
+    // collapses line breaks: the card showed one run-on block while the editor
+    // showed the same text with its breaks. `innerText` is layout-aware, so it
+    // reports collapsed breaks as spaces. That makes this a check on what is
+    // actually rendered, not on which class name the element happens to carry.
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/');
+    await analyse(page);
+    await expect(page.getByRole('button', { name: 'Use this', exact: true })).toHaveCount(3);
+
+    const card = page.getByRole('listitem').filter({ hasText: 'The shortlist usually turns' });
+    const shown = await card
+      .locator('p', { hasText: 'The shortlist usually turns' })
+      .evaluate((el) => (el as HTMLElement).innerText);
+    expect(shown).toContain('decides it.\n\nThe shortlist');
+
+    await card.getByRole('button', { name: 'Use this', exact: true }).click();
+    const editor = page.getByRole('textbox', { name: 'Your reply' });
+    const inEditor = await editor.inputValue();
+    expect(inEditor).toContain('decides it.\n\nThe shortlist');
+
+    await page.getByRole('button', { name: 'Copy reply' }).click();
+    await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible();
+    // Chrome on Windows stores clipboard text with CRLF line endings, whatever the
+    // page wrote, and every paste target turns them back into plain breaks. That is
+    // the operating system, not the app, so line endings are compared normalised.
+    // On Linux CI no conversion happens and the comparison is exact either way.
+    const copied = (await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n');
+    expect(copied).toBe(inEditor);
+    // And nothing a platform would show as a literal markup character.
+    expect(copied).not.toMatch(/\*\*|^#{1,6} |\]\(/m);
+  });
+});
+
 test.describe('honest states', () => {
   test('tells no-match apart from a failure', async ({ page }) => {
     await page.goto('/');

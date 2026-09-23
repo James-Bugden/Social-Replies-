@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { extractJsonObject } from './guards/parse';
 import { runGuards, type GuardReport } from './guards';
 import type { EligibleFact, GenerationContext, ProviderIdea } from './types';
+import { toPlatformText } from '@/lib/text/platform-text';
+import { PLATFORM_FORMAT_RULES } from './prompts/format';
 
 /**
  * The two single-answer tasks: rewriting the owner's own draft (D08) and reading a
@@ -58,6 +60,7 @@ export function assembleRewriteInstruction(
     'Return JSON only, with no prose around it, shaped exactly:',
     '{"revised_text":"...","english_meaning":null,"uses_fact_ids":[]}',
     'revised_text is plain text ready to post. Never put a link in it.',
+    PLATFORM_FORMAT_RULES,
     'uses_fact_ids lists the ids of the approved facts the revision relies on. Only the',
     'text of a supplied fact may become a first-person claim, and the revision must not',
     'say more than that fact says.',
@@ -100,10 +103,19 @@ export function parseRewriteOutput(rawText: string): TaskParseResult<RewriteOutp
 
   const result = rewriteOutputSchema.safeParse(json.value);
   if (!result.success) return { ok: false, detail: firstIssue(result.error, 'revised_text') };
-  if (result.data.revised_text.trim() === '') {
+
+  // Cleaned before the emptiness check, so a revision that was only formatting
+  // is refused rather than offered as a blank replacement for the owner's draft.
+  const value = {
+    ...result.data,
+    revised_text: toPlatformText(result.data.revised_text),
+    english_meaning:
+      result.data.english_meaning === null ? null : toPlatformText(result.data.english_meaning),
+  };
+  if (value.revised_text === '') {
     return { ok: false, detail: 'revised_text: the revision was empty.' };
   }
-  return { ok: true, value: result.data };
+  return { ok: true, value };
 }
 
 export function parseTranslationOutput(rawText: string): TaskParseResult<TranslationOutput> {
@@ -112,10 +124,12 @@ export function parseTranslationOutput(rawText: string): TaskParseResult<Transla
 
   const result = translationOutputSchema.safeParse(json.value);
   if (!result.success) return { ok: false, detail: firstIssue(result.error, 'english_meaning') };
-  if (result.data.english_meaning.trim() === '') {
+
+  const value = { ...result.data, english_meaning: toPlatformText(result.data.english_meaning) };
+  if (value.english_meaning === '') {
     return { ok: false, detail: 'english_meaning: the meaning was empty.' };
   }
-  return { ok: true, value: result.data };
+  return { ok: true, value };
 }
 
 /**

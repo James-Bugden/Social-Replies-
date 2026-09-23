@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
-import { Button, Card, Meta, SectionHeading, StatusLine } from './primitives';
+import { Button, Card, Meta, ReplyText, SectionHeading, StatusLine } from './primitives';
 import { EDITOR, MEANING } from '@/lib/workspace/copy';
 import { needsEnglishMeaning, type Platform } from '@/lib/contracts/vocabulary';
 import type { MeaningState, ProposalState } from '@/lib/workspace/reducer';
@@ -111,12 +111,7 @@ export function FinalReplyEditor(props: FinalReplyEditorProps) {
       {props.proposal ? (
         <Card className="mt-3 border-green bg-green-soft">
           <StatusLine>{EDITOR.rewriteReady}</StatusLine>
-          <p
-            className={`mt-2 text-reply ${chinese ? 'sr-cjk' : ''}`}
-            {...(chinese ? { lang: 'zh-TW' } : {})}
-          >
-            {props.proposal.text}
-          </p>
+          <ReplyText text={props.proposal.text} chinese={chinese} className="mt-2" />
           <div className="mt-2 flex flex-wrap gap-2">
             <Button variant="primary" onClick={props.onAcceptProposal}>
               {props.proposal.origin === 'idea' ? EDITOR.replaceReply : EDITOR.applyRewrite}

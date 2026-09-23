@@ -1,4 +1,5 @@
 import { providerOutputSchema, type ProviderOutput } from '../types';
+import { toPlatformText } from '@/lib/text/platform-text';
 
 /**
  * Turning a provider's text into a validated structure (AI-01).
@@ -67,10 +68,32 @@ export function parseProviderOutput(rawText: string): ParseResult {
     };
   }
 
-  const positions = result.data.ideas.map((i) => i.position).sort();
+  // Cleaned here, at the one point every generated idea passes through, so the
+  // guards judge the text the owner will actually post and no later caller can
+  // forget. See toPlatformText for why model markdown never reaches a platform.
+  const ideas = result.data.ideas.map((idea) => ({
+    ...idea,
+    angle_label: toPlatformText(idea.angle_label),
+    reply_text: toPlatformText(idea.reply_text),
+    english_meaning: idea.english_meaning === null ? null : toPlatformText(idea.english_meaning),
+    cta_text: idea.cta_text === null ? null : toPlatformText(idea.cta_text),
+  }));
+
+  const emptied = ideas.find((i) => i.reply_text === '');
+  if (emptied) {
+    // An answer that was only an image or a rule would otherwise reach the owner
+    // as an empty card.
+    return {
+      ok: false,
+      reason: 'wrong_shape',
+      detail: `ideas.${emptied.position}.reply_text: nothing was left once formatting was removed.`,
+    };
+  }
+
+  const positions = ideas.map((i) => i.position).sort();
   if (positions.join(',') !== '0,1,2') {
     return { ok: false, reason: 'wrong_shape', detail: 'ideas must occupy positions 0, 1 and 2.' };
   }
 
-  return { ok: true, value: result.data };
+  return { ok: true, value: { ...result.data, ideas } };
 }
