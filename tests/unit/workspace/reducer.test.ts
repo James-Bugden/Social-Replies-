@@ -195,7 +195,6 @@ describe('the English meaning is tied to exact Chinese (ZH-01)', () => {
         type: 'meaning_received',
         text: 'Most recruiters only skim it.',
         sourceHash: contentHash(chinese),
-        currentHash: contentHash(chinese),
       },
     );
   }
@@ -247,6 +246,9 @@ describe('the English meaning is tied to exact Chinese (ZH-01)', () => {
   });
 
   it('discards a translation that arrived for text that has since changed', () => {
+    // The reducer reads the live draft rather than trusting a hash the caller
+    // computed. The caller closed over the draft at click time, so the old
+    // version of this guard could never see a difference and never fired.
     const state = run(withMeaning(), {
       type: 'edit_draft',
       value: edited,
@@ -256,7 +258,6 @@ describe('the English meaning is tied to exact Chinese (ZH-01)', () => {
       type: 'meaning_received',
       text: 'A translation of the old text.',
       sourceHash: contentHash(chinese),
-      currentHash: contentHash(edited),
     });
 
     expect(next.meaning.status).toBe('stale');
@@ -312,6 +313,38 @@ describe('resource insertion preserves human text (RES-04)', () => {
     expect(next.proposal).not.toBeNull();
     // The editor itself is untouched until the owner accepts.
     expect(next.draft).toBe(`My reply.${inserted}`);
+  });
+
+  it('replaces cleanly when the previous block is untouched', () => {
+    const next = run(withResource(), {
+      type: 'insert_resource',
+      resource: resource({ id: '44444444-4444-4444-8444-000000000004' }),
+      insertedText: '\n\nAnother link.',
+      hash: 'h',
+    });
+
+    // Exactly one resource block in the proposal, not two.
+    expect(next.proposal?.text).toBe('My reply.\n\nAnother link.');
+  });
+
+  it('appends rather than deleting an edited block, and shows the result first', () => {
+    const edited = run(withResource(), {
+      type: 'edit_draft',
+      value: 'My reply.\n\nI wrote something on this, have a look.',
+      hash: 'h2',
+    });
+    const next = run(edited, {
+      type: 'insert_resource',
+      resource: resource({ id: '44444444-4444-4444-8444-000000000004' }),
+      insertedText: '\n\nAnother link.',
+      hash: 'h2',
+    });
+
+    // The owner's edited words survive, and the outcome is visible before it
+    // happens rather than applied silently.
+    expect(next.draft).toBe('My reply.\n\nI wrote something on this, have a look.');
+    expect(next.proposal?.text).toContain('have a look.');
+    expect(next.proposal?.text).toContain('Another link.');
   });
 
   it('removes an untouched inserted block exactly', () => {
@@ -412,5 +445,95 @@ describe('section states stay distinct (D12)', () => {
     expect(failed.resources.state).toBe('error');
     expect(failed.resources.reason).toBe('lookup_failed');
     expect(failed.history.state).toBe('error');
+  });
+});
+
+describe('Undo recorded status (DAY-02)', () => {
+  const saved = (): WorkspaceState =>
+    run(
+      analysed(),
+      { type: 'edit_draft', value: 'Recorded by mistake.', hash: contentHash('Recorded by mistake.') },
+      { type: 'save_started' },
+      { type: 'save_succeeded', replyId: 'reply-1', progress },
+    );
+
+  it('clears the recorded state and takes the new count from the server', () => {
+    const after: Progress = {
+      ...progress,
+      counts: { ...progress.counts, linkedin: progress.counts.linkedin - 1 },
+    };
+    const next = run(saved(), { type: 'undo_recorded', progress: after });
+
+    expect(next.save.status).toBe('idle');
+    expect(next.progress?.counts.linkedin).toBe(progress.counts.linkedin - 1);
+    // The text is still there: undoing a record is not discarding the reply.
+    expect(next.draft).toBe('Recorded by mistake.');
+  });
+
+  it('says so when the undo did not happen, rather than looking like it worked', () => {
+    const next = run(saved(), { type: 'undo_recorded_failed' });
+
+    expect(next.save.status).toBe('saved');
+    expect(next.save.status === 'saved' && next.save.undoFailed).toBe(true);
+    // The count has not moved, because nothing was withdrawn.
+    expect(next.progress?.counts.linkedin).toBe(progress.counts.linkedin);
+  });
+});
+
+describe('replacing an attached resource (RES-04)', () => {
+  const inserted = '\n\nFirst link.';
+
+  function withFirst(): WorkspaceState {
+    return run(
+      analysed(),
+      { type: 'edit_draft', value: 'My reply.', hash: contentHash('My reply.') },
+      { type: 'insert_resource', resource: resource(), insertedText: inserted, hash: 'h' },
+    );
+  }
+
+  it('attaches the new resource once the replacement is accepted', () => {
+    const second = resource({ id: '44444444-4444-4444-8444-000000000004', version: 3 });
+    const next = run(
+      withFirst(),
+      { type: 'insert_resource', resource: second, insertedText: '\n\nSecond link.', hash: 'h' },
+      { type: 'accept_proposal', hash: 'h2' },
+    );
+
+    // Without this the session still claimed the FIRST resource, so the reply was
+    // recorded with a snapshot naming a link that was no longer in the text, and
+    // Remove resource searched for text that had already been replaced.
+    expect(next.insertedResource?.resourceId).toBe(second.id);
+    expect(next.insertedResource?.version).toBe(3);
+    expect(next.draft).toContain('Second link.');
+    expect(next.draft).not.toContain('First link.');
+  });
+
+  it('keeps the original attached when the replacement is rejected', () => {
+    const next = run(
+      withFirst(),
+      {
+        type: 'insert_resource',
+        resource: resource({ id: '44444444-4444-4444-8444-000000000004' }),
+        insertedText: '\n\nSecond link.',
+        hash: 'h',
+      },
+      { type: 'reject_proposal' },
+    );
+
+    expect(next.insertedResource?.resourceId).toBe(resource().id);
+    expect(next.draft).toBe(`My reply.${inserted}`);
+  });
+
+  it('then removes the new block exactly', () => {
+    const second = resource({ id: '44444444-4444-4444-8444-000000000004' });
+    const next = run(
+      withFirst(),
+      { type: 'insert_resource', resource: second, insertedText: '\n\nSecond link.', hash: 'h' },
+      { type: 'accept_proposal', hash: 'h2' },
+      { type: 'remove_resource', hash: 'h3' },
+    );
+
+    expect(next.draft).toBe('My reply.');
+    expect(next.insertedResource).toBeNull();
   });
 });

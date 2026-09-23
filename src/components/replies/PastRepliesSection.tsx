@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Button, Card, Meta, Pill, SectionHeading, StatusLine } from './primitives';
 import { HISTORY } from '@/lib/workspace/copy';
+import { localDayOf } from '@/lib/workspace/dates';
 import { PLATFORM_LABELS, type Provenance } from '@/lib/contracts/vocabulary';
 import type { PastReply } from '@/lib/contracts/api';
 import type { HistorySection } from '@/lib/workspace/reducer';
@@ -28,13 +29,8 @@ const PROVENANCE_LABEL: Readonly<Record<Provenance, string>> = Object.freeze({
 });
 
 function dateLabel(reply: PastReply): string {
-  if (reply.date_precision === 'timestamp' && reply.posted_at) {
-    return new Date(reply.posted_at).toISOString().slice(0, 10);
-  }
-  if (reply.date_precision === 'date_only' && reply.posted_date) {
-    return reply.posted_date;
-  }
-  return HISTORY.dateUnknown;
+  if (reply.date_precision === 'unknown') return HISTORY.dateUnknown;
+  return localDayOf(reply.posted_at, reply.posted_date) ?? HISTORY.dateUnknown;
 }
 
 function excerptOf(text: string): string {

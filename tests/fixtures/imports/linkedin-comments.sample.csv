@@ -1,0 +1,6 @@
+comment_id,comment_url,posted_at,timezone,post_url,post_text,comment_author,comment_text
+li-c-1001,https://example.com/feed/comment/1001,2026-03-04T09:12:00+08:00,Asia/Taipei,https://example.com/feed/post/501,A synthetic post about screening,owner-synthetic,"Agreed, and the screening step is where the week goes."
+li-c-1002,https://example.com/feed/comment/1002,2026-03-05,Asia/Taipei,https://example.com/feed/post/502,A synthetic post about interviews,owner-synthetic,"Two questions, asked in this order:
+first what they built, then what they would change."
+li-c-1003,https://example.com/feed/comment/1003,,,https://example.com/feed/post/503,A synthetic post with no date,owner-synthetic,No date on this one at all.
+li-c-1004,https://example.com/feed/comment/1004,2026-03-06T11:00:00+08:00,Asia/Taipei,https://example.com/feed/post/504,A synthetic post from a stranger,stranger-synthetic,"This comment was written by somebody else entirely."

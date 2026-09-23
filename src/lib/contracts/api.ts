@@ -18,7 +18,7 @@ import { REQUEST_LIMITS } from './limits';
  *
  * Two shapes recur and are worth naming:
  *
- *   * a *section state* — loading, ready, empty or error — because "no matching
+ *   * a *section state*, meaning loading, ready, empty or error, because "no matching
  *     resource" and "the lookup failed" are different answers and the UI must be
  *     able to tell them apart (D12);
  *   * an *expected version* on every mutation, because a late response must not

@@ -53,6 +53,19 @@ export interface GenerationContext {
   recentReplies: { text: string; posted_on: string | null }[];
   /** Cited seeds from "Use this idea" on a past reply. */
   seedReplyIds: string[];
+  /**
+   * The owner's own text, when the model is revising rather than composing.
+   *
+   * A rewrite starts from words the owner wrote. A figure or a first-person claim
+   * already in that text is theirs, not an invention, and C06 is explicit that
+   * "user-written final text is never silently corrected by the generator". Without
+   * this, pressing Shorter on a reply mentioning something the owner never
+   * registered as an approved fact would withhold their own sentence back at them.
+   *
+   * It widens what counts as evidence; it never narrows it. A claim the rewrite
+   * *introduces* is still checked against the approved facts.
+   */
+  ownerBaseline?: string;
 }
 
 /**
@@ -116,6 +129,17 @@ export class ProviderError extends Error {
 }
 
 /**
+ * Which question a provider is being asked.
+ *
+ * The app asks for three things, and they are not interchangeable: three ideas, one
+ * rewrite of a draft, or the English of a Chinese draft. Passing this explicitly
+ * means a provider answers the request it was given rather than inferring one from
+ * the wording of an instruction, which is how the fake came to offer its ideas JSON
+ * as a rewrite.
+ */
+export type GenerationTask = 'ideas' | 'rewrite' | 'translation';
+
+/**
  * One paid provider plus a fake is the whole contract (C08). There is deliberately
  * no model-picker and no automatic failover to a second vendor: quietly sending the
  * owner's private writing somewhere they did not approve would be worse than an
@@ -125,15 +149,16 @@ export interface ReplyGenerator {
   readonly name: string;
   readonly model: string;
   /**
-   * Produces three ideas from a bounded context.
+   * Answers one bounded request: three ideas, one rewrite, or one English meaning.
    *
    * @param instruction assembled system instruction
    * @param userContent assembled, clearly-quoted user content
    * @param signal aborts when the attempt deadline passes
+   * @param task which question is being asked; absent means the ideas task
    */
   complete(
     instruction: string,
     userContent: string,
-    options: { signal: AbortSignal; maxOutputTokens: number },
+    options: { signal: AbortSignal; maxOutputTokens: number; task?: GenerationTask },
   ): Promise<GenerationAttempt>;
 }

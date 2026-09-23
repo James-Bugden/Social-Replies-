@@ -1,6 +1,7 @@
 import 'server-only';
 import type { NextRequest, NextResponse } from 'next/server';
 import { requireOwner, type OwnerSession } from '@/lib/auth/owner';
+import { isTestMode, TEST_OWNER_ID } from './test-mode';
 import { route } from './http';
 
 /**
@@ -18,7 +19,14 @@ export function ownerRoute(
   ) => Promise<NextResponse>,
 ) {
   return route(async (request, { requestId }) => {
-    const session = await requireOwner();
+    // The browser journeys run a real production build with no database and no
+    // credentials, so there is no session to verify. The bypass is gated on an
+    // exact environment value that nothing outside the harness and CI sets, and
+    // it hands back a stub client rather than a real one, so there is no path
+    // from here to live data even by mistake.
+    const session = isTestMode()
+      ? ({ userId: TEST_OWNER_ID, supabase: null as never } satisfies OwnerSession)
+      : await requireOwner();
     return handler(request, { requestId, session });
   });
 }

@@ -1,5 +1,5 @@
 import { GENERATION } from '@/lib/contracts/limits';
-import { AppError } from '@/lib/contracts/errors';
+import { AppError, type ErrorCode } from '@/lib/contracts/errors';
 import { assemblePrompt } from './prompts/assemble';
 import { parseProviderOutput, runGuards } from './guards';
 import { ProviderError, type GenerationContext, type ProviderIdea, type ReplyGenerator } from './types';
@@ -29,15 +29,40 @@ export interface GenerateOutcome {
   attempts: number;
   /** Present when status is not 'ok'. */
   failure?: {
-    code:
-      | 'provider_timeout'
-      | 'provider_unavailable'
-      | 'rate_limited'
-      | 'provider_invalid_response'
-      | 'withheld_unsafe';
+    code: GenerateFailureCode;
     detail: string;
     retryAfterSeconds?: number;
   };
+}
+
+export type GenerateFailureCode =
+  | 'provider_timeout'
+  | 'provider_unavailable'
+  | 'rate_limited'
+  | 'provider_invalid_response'
+  | 'withheld_unsafe';
+
+/**
+ * The reason the outcome gives, as the code the client is allowed to receive.
+ *
+ * Guards rejecting a response is not a provider fault, and reporting it as one put
+ * a 502 blaming the vendor in front of a decision this app made on purpose. The
+ * mapping lives here, next to the outcome it translates, so a route cannot quietly
+ * flatten two different problems into one again.
+ */
+export function errorCodeForOutcome(code: GenerateFailureCode | undefined): ErrorCode {
+  switch (code) {
+    case 'rate_limited':
+      return 'rate_limited';
+    case 'provider_timeout':
+      return 'provider_timeout';
+    case 'provider_invalid_response':
+      return 'provider_invalid_response';
+    case 'withheld_unsafe':
+      return 'withheld_unsafe';
+    default:
+      return 'provider_unavailable';
+  }
 }
 
 export interface GenerateDependencies {
@@ -53,7 +78,7 @@ export interface GenerateDependencies {
   env?: Readonly<Record<string, string | undefined>>;
 }
 
-function failureCodeFor(kind: ProviderError['kind']): NonNullable<GenerateOutcome['failure']>['code'] {
+function failureCodeFor(kind: ProviderError['kind']): GenerateFailureCode {
   switch (kind) {
     case 'timeout':
       return 'provider_timeout';
@@ -89,6 +114,10 @@ export async function generateIdeas(
   let attempts = 0;
   let lastWarnings: string[] = [];
   let repairHint: string | null = null;
+  // Why the last attempt was rejected, so the outcome can say the true reason.
+  // Reporting "did not pass the grounding checks" after a JSON parse failure
+  // would send whoever reads it looking at the wrong thing.
+  let lastRejection: 'unreadable' | 'unsafe' | null = null;
   let usage: GenerateOutcome['usage'] = { inputTokens: null, outputTokens: null, durationMs: 0 };
 
   const base = {
@@ -123,7 +152,7 @@ export async function generateIdeas(
       attemptResult = await deps.generator.complete(
         repairHint ? `${instruction}\n\n# Correction\n${repairHint}` : instruction,
         userContent,
-        { signal: controller.signal, maxOutputTokens: GENERATION.outputTokenBudget },
+        { signal: controller.signal, maxOutputTokens: GENERATION.outputTokenBudget, task: 'ideas' },
       );
     } catch (error) {
       clearTimeout(timer);
@@ -174,6 +203,7 @@ export async function generateIdeas(
 
     const parsed = parseProviderOutput(attemptResult.rawText);
     if (!parsed.ok) {
+      lastRejection = 'unreadable';
       repairHint = `The previous response could not be read: ${parsed.detail}. Return JSON only.`;
       continue;
     }
@@ -192,12 +222,14 @@ export async function generateIdeas(
       };
     }
 
+    lastRejection = 'unsafe';
     repairHint = report.repairHint;
   }
 
-  // The repair budget is spent and the result is still unsafe. Showing it anyway
-  // would be the one failure the owner cannot detect by reading, so it is withheld
-  // and retrieval plus the manual editor carry the workflow.
+  // The repair budget is spent. Either the response could not be read at all, or
+  // it could be read and was not safe to show. Showing an unsafe one anyway would
+  // be the single failure the owner cannot catch by reading, so both outcomes
+  // withhold the ideas and leave retrieval and the manual editor carrying the work.
   return {
     ...base,
     status: 'withheld',
@@ -205,9 +237,15 @@ export async function generateIdeas(
     warnings: lastWarnings,
     usage,
     attempts,
-    failure: {
-      code: 'withheld_unsafe',
-      detail: 'The suggestions did not pass the grounding checks and were not shown.',
-    },
+    failure:
+      lastRejection === 'unreadable'
+        ? {
+            code: 'provider_invalid_response',
+            detail: 'The provider did not return a readable response.',
+          }
+        : {
+            code: 'withheld_unsafe',
+            detail: 'The suggestions did not pass the grounding checks and were not shown.',
+          },
   };
 }

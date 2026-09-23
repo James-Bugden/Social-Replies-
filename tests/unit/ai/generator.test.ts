@@ -306,3 +306,38 @@ describe('the prompt treats pasted text as data', () => {
     expect(userContent.split(`</source id="${nonce}">`)).toHaveLength(2);
   });
 });
+
+describe('the withheld reason is the true one', () => {
+  it('says the response was unreadable when it never parsed', async () => {
+    // Malformed on every attempt, so the budget runs out on a parse failure
+    // rather than on a guard failure.
+    const generator: ReplyGenerator = {
+      name: 'broken',
+      model: 'broken',
+      async complete() {
+        return {
+          rawText: 'I am afraid I cannot help with that.',
+          usage: { inputTokens: 1, outputTokens: 1, durationMs: 1 },
+          model: 'broken',
+          provider: 'broken',
+        };
+      },
+    };
+
+    const outcome = await generateIdeas(context(), { generator });
+
+    expect(outcome.status).toBe('withheld');
+    expect(outcome.failure?.code).toBe('provider_invalid_response');
+    expect(outcome.failure?.detail).not.toMatch(/grounding/i);
+  });
+
+  it('says grounding when the response parsed but failed the guards', async () => {
+    const outcome = await generateIdeas(context(), {
+      generator: createFakeGenerator({ duplicateIdeas: true }),
+    });
+
+    expect(outcome.status).toBe('withheld');
+    expect(outcome.failure?.code).toBe('withheld_unsafe');
+    expect(outcome.failure?.detail).toMatch(/grounding/i);
+  });
+});

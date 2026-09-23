@@ -1,4 +1,4 @@
-import type { ReactNode, ButtonHTMLAttributes } from 'react';
+import type { ReactNode, ButtonHTMLAttributes, Ref } from 'react';
 
 /**
  * The small set of shapes every section reuses (D02, D13).
@@ -42,6 +42,8 @@ export function Card({
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: 'primary' | 'secondary' | 'quiet';
   size?: 'primary' | 'utility';
+  /** Needed so a dialog can return focus to the control that opened it (D13). */
+  ref?: Ref<HTMLButtonElement>;
 };
 
 export function Button({

@@ -7,12 +7,14 @@ import { SourceInput } from './SourceInput';
 import { PastRepliesSection } from './PastRepliesSection';
 import { ResourcesSection } from './ResourcesSection';
 import { IdeasSection } from './IdeasSection';
-import { FinalReplyEditor } from './FinalReplyEditor';
+import { FinalReplyEditor, FINAL_EDITOR_ID } from './FinalReplyEditor';
 import { ActionStrip } from './ActionStrip';
+import { AddPastReplyDialog } from './AddPastReplyDialog';
 import { Button } from './primitives';
 import { EDITOR, MANUAL } from '@/lib/workspace/copy';
 import { initialState, isEditedSinceCopy, workspaceReducer } from '@/lib/workspace/reducer';
 import { api, ApiError, newOperationKey } from '@/lib/workspace/client';
+import { forgetDraft, recallDraft, rememberDraft } from '@/lib/workspace/recovery';
 import { contentHash } from '@/lib/contracts/text';
 import type { Platform } from '@/lib/contracts/vocabulary';
 import type { Progress, QualifiedResource, ReplyIdea } from '@/lib/contracts/api';
@@ -45,18 +47,75 @@ export function Workspace({
   const [state, dispatch] = useReducer(workspaceReducer, initialPlatform, initialState);
   const [busy, setBusy] = useState(false);
   const [refining, setRefining] = useState(false);
+  const [refineNotice, setRefineNotice] = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
+  const [sourceExpanded, setSourceExpanded] = useState(false);
   const router = useRouter();
 
   const generationAbort = useRef<AbortController | null>(null);
-  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSyncedDraft = useRef<string>('');
   const operationKey = useRef<string | null>(null);
+  const manualTrigger = useRef<HTMLButtonElement>(null);
 
   const draftHash = useMemo(() => contentHash(state.draft), [state.draft]);
 
   useEffect(() => {
     if (initialProgress) dispatch({ type: 'progress_refreshed', progress: initialProgress });
   }, [initialProgress]);
+
+  /**
+   * Put the reply back after a trip to a utility page.
+   *
+   * This component unmounts on navigation, so without this, opening Resources to
+   * add the very link the owner wanted discarded what they had written. Runs once,
+   * before anything else can change the draft.
+   */
+  useEffect(() => {
+    const recovered = recallDraft();
+    if (!recovered) return;
+    dispatch({
+      type: 'restore_draft',
+      sessionId: recovered.sessionId,
+      platform: recovered.platform,
+      targetKind: recovered.targetKind,
+      sourceText: recovered.sourceText,
+      parentText: recovered.parentText,
+      sourceUrl: recovered.sourceUrl,
+      draft: recovered.draft,
+      editorVersion: recovered.editorVersion,
+      sourceVersion: recovered.sourceVersion,
+      contextVersion: recovered.contextVersion,
+    });
+    lastSyncedDraft.current = recovered.draft;
+  }, []);
+
+  // Kept current so a navigation at any moment has something to come back to.
+  useEffect(() => {
+    if (!state.sessionId) return;
+    rememberDraft({
+      sessionId: state.sessionId,
+      platform: state.platform,
+      targetKind: state.targetKind,
+      sourceText: state.sourceText,
+      parentText: state.parentText,
+      sourceUrl: state.sourceUrl,
+      draft: state.draft,
+      editorVersion: state.editorVersion,
+      sourceVersion: state.sourceVersion,
+      contextVersion: state.contextVersion,
+    });
+  }, [
+    state.sessionId,
+    state.platform,
+    state.targetKind,
+    state.sourceText,
+    state.parentText,
+    state.sourceUrl,
+    state.draft,
+    state.editorVersion,
+    state.sourceVersion,
+    state.contextVersion,
+  ]);
 
   // The local day rolls over at Taipei midnight and the window may have been in the
   // background for hours, so the count is refetched on focus rather than trusted.
@@ -107,7 +166,11 @@ export function Workspace({
               ? 'rate_limited'
               : error.envelope.code === 'not_configured'
                 ? 'not_configured'
-                : 'failed'
+                : // The guards rejecting a response is not the provider failing,
+                  // and the owner is told which it was.
+                  error.envelope.code === 'withheld_unsafe'
+                  ? 'withheld'
+                  : 'failed'
             : 'failed';
         dispatch({
           type: 'generate_failed',
@@ -166,35 +229,53 @@ export function Workspace({
     }
   }, [state.platform, state.targetKind, state.sourceText, state.parentText, state.sourceUrl, runGeneration]);
 
-  const onDraftChange = useCallback(
-    (value: string) => {
-      dispatch({ type: 'edit_draft', value, hash: contentHash(value) });
+  const onDraftChange = useCallback((value: string) => {
+    dispatch({ type: 'edit_draft', value, hash: contentHash(value) });
+  }, []);
 
-      if (draftTimer.current) clearTimeout(draftTimer.current);
-      if (!state.sessionId) return;
-      const sessionId = state.sessionId;
+  /**
+   * Keeps the server draft level with the editor, whatever moved it.
+   *
+   * This used to hang off the textarea's onChange, which meant the server only
+   * ever saw text the owner had *typed*. Using an idea, accepting a rewrite,
+   * inserting a resource and Undo all change the draft without a keystroke, so
+   * the server kept an older version, and everything that reads it worked on
+   * text the owner was no longer looking at: Shorter and Warmer were dead until
+   * the first keystroke, and a second rewrite was computed from the draft the
+   * owner had already replaced.
+   *
+   * Watching the draft itself catches every one of those paths, including any
+   * added later.
+   */
+  useEffect(() => {
+    if (!state.sessionId) return;
+    if (state.draft === lastSyncedDraft.current) return;
 
-      draftTimer.current = setTimeout(() => {
-        api
-          .saveDraft({
-            session_id: sessionId,
-            expected_editor_version: state.editorVersion,
-            draft_text: value,
-          })
-          .then((result) => dispatch({ type: 'draft_saved_to_server', editorVersion: result.editor_version }))
-          .catch(() => {
-            // A failed debounced save is not shown. The text is still on screen and
-            // "Draft saved" is never claimed for text that only exists in memory.
-          });
-      }, 800);
-    },
-    [state.sessionId, state.editorVersion],
-  );
+    const sessionId = state.sessionId;
+    const value = state.draft;
+    const version = state.editorVersion;
+
+    const timer = setTimeout(() => {
+      api
+        .saveDraft({ session_id: sessionId, expected_editor_version: version, draft_text: value })
+        .then((result) => {
+          lastSyncedDraft.current = value;
+          dispatch({ type: 'draft_saved_to_server', editorVersion: result.editor_version });
+        })
+        .catch(() => {
+          // Never shown. The text is on screen, and "Draft saved" is not claimed
+          // for text that only exists in memory (D12).
+        });
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [state.draft, state.sessionId, state.editorVersion]);
 
   const onRefine = useCallback(
     async (action: 'shorter' | 'more_direct' | 'warmer' | 'add_personal_example') => {
       if (!state.sessionId) return;
       setRefining(true);
+      setRefineNotice(null);
       const baseVersion = state.editorVersion;
       try {
         const result = await api.refine({
@@ -213,8 +294,15 @@ export function Workspace({
             ideaId: null,
           },
         });
-      } catch {
-        // A failed refinement changes nothing. The editor still holds their text.
+      } catch (error) {
+        // A failed refinement changes nothing, but silence is its own bug: the
+        // owner presses Shorter, nothing happens, and they cannot tell whether it
+        // is slow, broken, or refused.
+        setRefineNotice(
+          error instanceof ApiError && error.envelope.code === 'withheld_unsafe'
+            ? EDITOR.rewriteWithheld
+            : EDITOR.rewriteFailed,
+        );
       } finally {
         setRefining(false);
       }
@@ -232,16 +320,18 @@ export function Workspace({
         text_hash: hashAtRequest,
         request_key: newOperationKey(),
       });
+      // No currentHash is passed: this handler closed over the draft when the
+      // owner clicked, so anything it computes describes the old text. The
+      // reducer compares against the live draft instead.
       dispatch({
         type: 'meaning_received',
         text: result.english_meaning,
         sourceHash: result.source_hash,
-        currentHash: contentHash(state.draft),
       });
     } catch {
       dispatch({ type: 'meaning_failed' });
     }
-  }, [state.sessionId, state.draft, draftHash]);
+  }, [state.sessionId, draftHash]);
 
   const onMarkPosted = useCallback(async () => {
     if (!state.sessionId) return;
@@ -276,6 +366,43 @@ export function Workspace({
 
   const onUseIdea = useCallback((idea: ReplyIdea) => dispatch({ type: 'use_idea', idea }), []);
 
+  /**
+   * Undo recorded status.
+   *
+   * This was a no-op for a while, which is the worst thing a control like this
+   * can be: the owner presses it believing they have reversed a recording, the
+   * count does not move, and the reply stays eligible as voice evidence. It
+   * withdraws this app's record only; the reply on the social platform is
+   * untouched and the copy says so.
+   */
+  const onUndoRecorded = useCallback(async () => {
+    if (state.save.status !== 'saved') return;
+    const replyId = state.save.replyId;
+    try {
+      await api.libraryPatch(replyId, { action: 'withdraw', withdrawn: true });
+      const progress = await api.progress();
+      dispatch({ type: 'undo_recorded', progress });
+    } catch {
+      dispatch({ type: 'undo_recorded_failed' });
+    }
+  }, [state.save]);
+
+  const loadMoreHistory = useCallback(async () => {
+    if (!state.history.nextCursor) return;
+    try {
+      const page = await api.librarySearch({
+        query: state.sourceText,
+        cursor: state.history.nextCursor,
+        limit: 5,
+        include_unknown_dates: true,
+      });
+      // Paging never touches the editor or the current selection (D05).
+      dispatch({ type: 'history_page', items: page.items, nextCursor: page.next_cursor });
+    } catch {
+      // Failing to fetch more leaves what is already on screen exactly as it is.
+    }
+  }, [state.history.nextCursor, state.sourceText]);
+
   const onAddResource = useCallback(
     (resource: QualifiedResource) => {
       const insertion = resource.url
@@ -301,18 +428,18 @@ export function Workspace({
           parentText={state.parentText}
           sourceUrl={state.sourceUrl}
           busy={busy}
-          collapsed={state.sessionId !== null}
+          collapsed={state.sessionId !== null && !sourceExpanded}
           onPlatformChange={(platform) => dispatch({ type: 'set_platform', platform })}
           onTargetKindChange={(targetKind) => dispatch({ type: 'set_target_kind', targetKind })}
           onFieldChange={(field, value) => dispatch({ type: 'edit_source', field, value })}
           onSubmit={analyse}
-          onExpandToggle={() => undefined}
+          onExpandToggle={() => setSourceExpanded((value) => !value)}
         />
 
         <PastRepliesSection
           section={state.history}
           onRetry={analyse}
-          onMore={() => undefined}
+          onMore={loadMoreHistory}
           onUse={(reply) => {
             if (state.sessionId) {
               void runGeneration(state.sessionId, state.sourceVersion, state.contextVersion, [reply.id]);
@@ -359,6 +486,7 @@ export function Workspace({
           hasInsertedResource={state.insertedResource !== null}
           canAddPersonalExample={hasEligibleFacts}
           refining={refining}
+          notice={refineNotice}
           onChange={onDraftChange}
           onRefine={onRefine}
           onAcceptProposal={() => dispatch({ type: 'accept_proposal', hash: draftHash })}
@@ -369,7 +497,7 @@ export function Workspace({
         />
 
         <div className="mb-4">
-          <Button variant="quiet" onClick={() => setShowManual(true)}>
+          <Button variant="quiet" ref={manualTrigger} onClick={() => setShowManual(true)}>
             {MANUAL.trigger}
           </Button>
           <a href="#your-reply" className="ml-3 text-meta text-ink-soft underline">
@@ -383,19 +511,30 @@ export function Workspace({
         draft={state.draft}
         save={state.save}
         editedSinceCopy={isEditedSinceCopy(state, draftHash)}
-        selectTargetId="your-reply"
+        selectTargetId={FINAL_EDITOR_ID}
         onCopied={() => dispatch({ type: 'copied', hash: draftHash })}
         onMarkPosted={onMarkPosted}
-        onUndoRecorded={() => undefined}
-        onNextReply={() => dispatch({ type: 'next_reply' })}
+        onUndoRecorded={onUndoRecorded}
+        onNextReply={() => {
+          // Recorded, and the owner has moved on, so the local copy has nothing
+          // left to protect.
+          forgetDraft();
+          lastSyncedDraft.current = '';
+          dispatch({ type: 'next_reply' });
+        }}
       />
 
       {showManual ? (
-        <div role="dialog" aria-modal="true" aria-label={MANUAL.heading} className="sr-only">
-          {/* The dialog itself is SR-018 work. The trigger exists here so the
-              workspace's own focus handling can be tested alongside it. */}
-          <Button onClick={() => setShowManual(false)}>{MANUAL.cancel}</Button>
-        </div>
+        <AddPastReplyDialog
+          platform={state.platform}
+          onClose={() => {
+            setShowManual(false);
+            // Focus returns to the control that opened the dialog, so a keyboard
+            // user is not dropped back at the top of the page (D13).
+            manualTrigger.current?.focus();
+          }}
+          onSaved={(progress) => dispatch({ type: 'progress_refreshed', progress })}
+        />
       ) : null}
     </>
   );

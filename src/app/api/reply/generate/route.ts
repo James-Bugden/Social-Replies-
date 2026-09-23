@@ -4,7 +4,7 @@ import { getStore } from '@/lib/server/get-store';
 import { AppError } from '@/lib/contracts/errors';
 import { generateRequestSchema, type GenerateResponse } from '@/lib/contracts/api';
 import { createGenerator } from '@/lib/ai';
-import { generateIdeas } from '@/lib/ai/generator';
+import { errorCodeForOutcome, generateIdeas } from '@/lib/ai/generator';
 import { assemblePrompt } from '@/lib/ai/prompts/assemble';
 
 export const dynamic = 'force-dynamic';
@@ -69,15 +69,16 @@ export const POST = ownerRoute(async (request, { session }) => {
   });
 
   if (outcome.status !== 'ok') {
-    const code =
-      outcome.failure?.code === 'rate_limited'
-        ? 'rate_limited'
-        : outcome.failure?.code === 'provider_timeout'
-          ? 'provider_timeout'
-          : outcome.failure?.code === 'withheld_unsafe'
-            ? 'provider_invalid_response'
-            : 'provider_unavailable';
-    throw new AppError(code, 'Could not create reply ideas. Your draft is unchanged.', {
+    // The generator's reason is carried through rather than flattened. "Could not
+    // be read" and "was read and was not safe" are different problems, and a reader
+    // of a request log should be able to tell them apart. The second one is also
+    // not the provider's fault, so it does not go out under a message blaming it.
+    const code = errorCodeForOutcome(outcome.failure?.code);
+    const message =
+      code === 'withheld_unsafe'
+        ? 'Those suggestions did not pass the grounding checks, so they are not shown. Your draft is unchanged.'
+        : 'Could not create reply ideas. Your draft is unchanged.';
+    throw new AppError(code, message, {
       ...(outcome.failure?.retryAfterSeconds
         ? { retryAfterSeconds: outcome.failure.retryAfterSeconds }
         : {}),

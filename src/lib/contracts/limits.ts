@@ -6,13 +6,20 @@
  * X in particular is not limited to 280 characters here.
  */
 
+/**
+ * The ceiling shared by the request limit and the import limit, named once so the
+ * two cannot drift. An imported reply longer than a writable one would be accepted
+ * by the parser and then rejected by the database.
+ */
+const REQUEST_LIMITS_TEXT_CEILING = 16_000;
+
 /** C07 request bounds. Oversize input is rejected, never silently truncated. */
 export const REQUEST_LIMITS = {
   bodyBytes: 128 * 1024,
-  sourceTextCodePoints: 16_000,
+  sourceTextCodePoints: REQUEST_LIMITS_TEXT_CEILING,
   parentTextCodePoints: 8_000,
   keywordCodePoints: 200,
-  finalReplyCodePoints: 16_000,
+  finalReplyCodePoints: REQUEST_LIMITS_TEXT_CEILING,
   searchPageSize: 25,
 } as const;
 
@@ -61,6 +68,27 @@ export const EMBEDDING = {
   leaseSeconds: 120,
   /** Exponential backoff base, in seconds. */
   backoffBaseSeconds: 15,
+} as const;
+
+/**
+ * C04 import bounds. These protect the machine doing the import, not the app: an
+ * archive is an untrusted file the owner downloaded from a platform, and a
+ * decompression bomb is a real shape of that file.
+ */
+export const IMPORT_LIMITS = {
+  /** A single archive this process will open at all. */
+  maxArchiveBytes: 512 * 1024 * 1024,
+  /** A single file read into memory for parsing. */
+  maxFileBytes: 64 * 1024 * 1024,
+  /** Total declared uncompressed size across every entry. */
+  maxDeclaredUncompressedBytes: 1024 * 1024 * 1024,
+  /** Uncompressed divided by compressed, across the whole archive. */
+  maxExpansionRatio: 100,
+  maxEntries: 20_000,
+  /** Matches the reply_library length check, so an oversize row fails here first. */
+  maxRecordTextCodePoints: REQUEST_LIMITS_TEXT_CEILING,
+  /** Records per transaction. Bounded so a crash loses at most one chunk. */
+  defaultChunkSize: 200,
 } as const;
 
 export const APP = {

@@ -26,6 +26,12 @@ const FORBIDDEN_TRACKED = [
   { id: 'key-material', re: /\.(pem|key|p12|pfx)$/ },
   { id: 'sqlite-db', re: /\.sqlite3?$/ },
   { id: 'test-artifacts', re: /^(test-results|playwright-report|traces|artifacts)\// },
+  // Scratch files a reviewer or a debugging session left behind. They are not
+  // private data, but they are not the project either: they get committed by an
+  // over-eager `git add -A` while something else is mid-flight, and then they fail
+  // CI for reasons that have nothing to do with the change under review.
+  { id: 'scratch-file', re: /(^|\/)(tmp-|__zz|scratch[-.]|repro-)/ },
+  { id: 'scratch-suffix', re: /\.(scratch|tmp|bak|orig)\.[a-z]+$/ },
 ];
 
 const REQUIRED_IGNORES = [
@@ -72,6 +78,8 @@ const REQUIRED_ENV_NAMES = [
   'EMBEDDING_API_KEY',
   'PRIVATE_SOURCE_ROOT',
   'PRIVATE_EVAL_SET_PATH',
+  'SUPABASE_DB_URL',
+  'PRIVATE_OWNER_AUTHOR_IDS',
 ];
 
 const problems = [];

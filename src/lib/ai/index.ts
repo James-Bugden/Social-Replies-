@@ -6,6 +6,15 @@ import type { ReplyGenerator } from './types';
 export * from './types';
 export { generateIdeas, type GenerateOutcome } from './generator';
 export { runGuards, type GuardReport } from './guards';
+export {
+  assembleRewriteInstruction,
+  assembleTranslationInstruction,
+  checkRewrite,
+  parseRewriteOutput,
+  parseTranslationOutput,
+  type RewriteAction,
+  type RewriteOutput,
+} from './tasks';
 export { assemblePrompt } from './prompts/assemble';
 export { createFakeGenerator } from './providers/fake';
 

@@ -1,7 +1,8 @@
-import { ownerRoute, unwrapRpc } from '@/lib/server/owner-route';
+import { ownerRoute } from '@/lib/server/owner-route';
+import { getStore } from '@/lib/server/get-store';
 import { jsonResponse, readJson } from '@/lib/server/http';
 import { AppError } from '@/lib/contracts/errors';
-import { markPostedRequestSchema, progressSchema, type Progress } from '@/lib/contracts/api';
+import { markPostedRequestSchema, progressSchema } from '@/lib/contracts/api';
 import { contentHash, payloadFingerprint, searchText } from '@/lib/contracts/text';
 import { publicConfig, serverConfig } from '@/lib/config/env';
 
@@ -40,39 +41,30 @@ export const POST = ownerRoute(async (request, { session }) => {
   const embeddingModel =
     serverConfig().embedding.mode === 'live' ? serverConfig().embedding.model : 'unconfigured';
 
-  const result = unwrapRpc<{
-    reply_id: string;
-    replayed: boolean;
-    recorded_at: string;
-    embedding_status: string;
-  }>(
-    await session.supabase.rpc('record_reply', {
-      p_operation_key: operationKey,
-      p_fingerprint: fingerprint,
-      p_session_id: body.session_id,
-      p_editor_version: body.editor_version,
-      p_final_text: body.final_text,
-      p_content_hash: contentHash(body.final_text),
-      p_search_text: searchText(body.final_text),
-      p_reply_url: body.reply_url ?? null,
-      p_posted_at: body.posted_at ?? null,
-      p_resource_snapshots: body.resource_snapshots,
-      p_embedding_model: embeddingModel,
-    }),
-  );
+  const store = getStore(session);
+
+  const result = await store.recordReply({
+    operationKey,
+    fingerprint,
+    sessionId: body.session_id,
+    editorVersion: body.editor_version,
+    finalText: body.final_text,
+    contentHash: contentHash(body.final_text),
+    searchText: searchText(body.final_text),
+    replyUrl: body.reply_url ?? null,
+    postedAt: body.posted_at ?? null,
+    resourceSnapshots: body.resource_snapshots,
+    embeddingModel,
+  });
 
   // A replayed response refreshes the current counts rather than reapplying an
   // optimistic increment, so two tabs cannot show 4/10 and 5/10 for one reply.
-  const progress = progressSchema.parse(
-    unwrapRpc<Progress>(
-      await session.supabase.rpc('daily_counts', { p_timezone: publicConfig().timezone }),
-    ),
-  );
+  const progress = progressSchema.parse(await store.dailyCounts(publicConfig().timezone));
 
   return jsonResponse({
-    reply_id: result.reply_id,
+    reply_id: result.replyId,
     replayed: result.replayed,
-    recorded_at: result.recorded_at,
+    recorded_at: result.recordedAt,
     progress,
     embedding_status: embeddingModel === 'unconfigured' ? 'unavailable' : 'queued',
   });

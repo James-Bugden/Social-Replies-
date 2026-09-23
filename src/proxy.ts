@@ -4,13 +4,14 @@ import { createServerClient } from '@supabase/ssr';
 /**
  * Session refresh, and nothing else that matters.
  *
- * Middleware runs before every matched request and is the only place that can
+ * Named `proxy` because Next 16 renamed the convention; it is the same hook.
+ * It runs before every matched request and is the only place that can
  * write a refreshed auth cookie. It deliberately does **not** decide who may read
  * what: navigation-level gating is a convenience, and C01 is explicit that the
  * real boundary is in RLS and in each route's own owner check. A middleware bug
  * must not be able to expose a row.
  */
-export async function middleware(request: NextRequest) {
+export default async function proxy(request: NextRequest) {
   const response = NextResponse.next({ request });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;

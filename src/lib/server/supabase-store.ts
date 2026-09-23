@@ -1,20 +1,24 @@
 import 'server-only';
+import { randomUUID } from 'node:crypto';
 import type { OwnerSession } from '@/lib/auth/owner';
 import { AppError } from '@/lib/contracts/errors';
 import { APP, RETRIEVAL, RESOURCES as RESOURCE_LIMITS } from '@/lib/contracts/limits';
 import { contentHash, searchText } from '@/lib/contracts/text';
-import { isEligibleForGeneration } from '@/lib/facts/eligibility';
 import { selectRelevantFacts } from '@/lib/facts/selection';
 import { buildFactContext } from '@/lib/facts/context';
 import { isInsertable } from '@/lib/resources/eligibility';
 import { resolveResourceUrl } from '@/lib/resources/resolve';
 import { buildCta } from '@/lib/resources/cta';
-import { serverConfig } from '@/lib/config/env';
-import { searchReplies } from '@/lib/retrieval/search';
+import { publicConfig, serverConfig } from '@/lib/config/env';
+import { searchReplies, type SearchOptions } from '@/lib/retrieval/search';
 import { rpcCandidateSource } from '@/lib/retrieval/candidates';
 import type { PastReply, Progress, QualifiedResource, ReplyIdea } from '@/lib/contracts/api';
 import type { Platform } from '@/lib/contracts/vocabulary';
+import { eligibilityReason, isEligibleForGeneration } from '@/lib/facts/eligibility';
 import type {
+  AdminFact,
+  AdminResource,
+  AdminSettings,
   AnalyseInput,
   AnalyseResult,
   GenerationRunInput,
@@ -34,10 +38,11 @@ import type {
  * obtain one from here: an ordinary request cannot bypass the owner boundary even
  * if a route forgot to check it (C01).
  *
- * The composite operations that must be atomic — recording a reply, correcting one,
- * withdrawing one — are RPC calls into the SQL functions rather than several round
- * trips, because a partial write here would leave a reply saved with no search row,
- * or a count that disagrees with the library.
+ * The composite operations that must be atomic, meaning recording a reply,
+ * correcting one and withdrawing one, are RPC calls into the SQL functions rather
+ * than several round
+ * trips, because a partial write here would leave a reply saved with no search
+ * row, or a count that disagrees with the library.
  */
 
 interface RpcResult<T> {
@@ -59,6 +64,74 @@ function unwrap<T>(result: RpcResult<T>): T {
   return result.data;
 }
 
+/**
+ * The eligibility half of every library-facing search, in one place.
+ *
+ * The cursor a search mints is bound to the exact options that produced it, and
+ * analyse pages its history through the same library search endpoint. So if the
+ * first page and the second page disagree about a single eligibility flag, the
+ * second page is rejected as belonging to a different search and "Show more
+ * matches" fails for the whole life of the feature. Making both pages call this
+ * one function is what keeps them provably identical; a caller that wants
+ * different filters says so in `input`, which is then part of the cursor too.
+ *
+ * AI drafts are included only when the caller has named `ai_draft` explicitly.
+ * C05 keeps drafts searchable on an explicit filter and out of everything else,
+ * so an unconditional `includeAiDrafts: true` was both wider than the contract
+ * allows and the reason the two pages could never agree.
+ */
+function librarySearchOptions(input: LibrarySearchInput): SearchOptions {
+  return {
+    query: input.query,
+    ...(input.platforms ? { platforms: input.platforms } : {}),
+    ...(input.provenances ? { provenances: input.provenances } : {}),
+    includeAiDrafts: input.provenances?.includes('ai_draft') ?? false,
+    includeUnknownDates: input.includeUnknownDates,
+    cursor: input.cursor,
+    limit: input.limit,
+  };
+}
+
+/**
+ * The history search analyse runs, expressed through the library search options.
+ *
+ * Analyse returns the first page and the workspace asks the library endpoint for
+ * the second, so the two must be the same search. Routing both through
+ * `librarySearchOptions` makes that a fact about the code rather than a pair of
+ * object literals someone has to remember to keep in step.
+ */
+function historyOptions(query: string, limit: number = RETRIEVAL.initialResults): SearchOptions {
+  return librarySearchOptions({ query, includeUnknownDates: true, cursor: null, limit });
+}
+
+/**
+ * The owner's local calendar day for an instant.
+ *
+ * `posted_at` is a UTC instant and slicing its first ten characters yields the
+ * UTC day. Taipei is eight hours ahead, so everything posted between 16:00 and
+ * 24:00 UTC renders as the day before. The counter already computes the Taipei
+ * day in SQL (C09), so a UTC date here would contradict the number displayed
+ * beside it during exactly the 00:00 to 08:00 window the counter exists to get
+ * right. The exact instant is never discarded: it travels on `posted_at` in the
+ * retrieval rows, so the display layer never has to reconstruct it from this.
+ */
+function localDay(instant: string, timeZone: string): string | null {
+  const parsed = new Date(instant);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(parsed);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value;
+  const year = get('year');
+  const month = get('month');
+  const day = get('day');
+  if (!year || !month || !day) return null;
+  return `${year}-${month}-${day}`;
+}
+
 export function createSupabaseStore(session: OwnerSession): Store {
   const { supabase, userId } = session;
   // An ordinary request reaches retrieval through PostgREST, so it calls the two
@@ -67,6 +140,9 @@ export function createSupabaseStore(session: OwnerSession): Store {
   const candidates = rpcCandidateSource(supabase as unknown as Parameters<typeof rpcCandidateSource>[0]);
   const config = serverConfig();
   const embeddingModel = config.embedding.mode === 'live' ? config.embedding.model : 'unconfigured';
+  // The same zone the counter uses, so a displayed date and a count of the same
+  // day can never be computed against two different clocks.
+  const timezone = publicConfig().timezone;
 
   async function qualifiedResourcesFor(text: string, platform: Platform): Promise<{
     items: QualifiedResource[];
@@ -189,6 +265,87 @@ export function createSupabaseStore(session: OwnerSession): Store {
     },
 
     async analyse(input: AnalyseInput): Promise<AnalyseResult> {
+      // The session id is minted here and claimed *with* the key, in one insert.
+      //
+      // Claiming the key first and filling in `result_id` after both inserts
+      // leaves a window in which a concurrent or retried call finds the key
+      // taken, reads `result_id = null`, concludes there is no session to reuse,
+      // and creates a second session and a second source row. That is precisely
+      // the duplicate the key exists to prevent (C09), so the key is never
+      // written without the id of the thing it stands for.
+      const sessionId = randomUUID();
+      const { data: claimed } = await supabase
+        .from('mutation_keys')
+        .insert({
+          user_id: userId,
+          key: input.requestKey,
+          request_fingerprint: contentHash(input.sourceText),
+          operation: 'analyse',
+          result_id: sessionId,
+        })
+        .select('key')
+        .maybeSingle();
+
+      if (!claimed) {
+        const { data: existing } = await supabase
+          .from('mutation_keys')
+          .select('result_id')
+          .eq('key', input.requestKey)
+          .maybeSingle();
+        const existingSession = existing?.result_id
+          ? await this.getSession(existing.result_id)
+          : null;
+        if (existingSession) {
+          const [history, resources] = await Promise.all([
+            searchReplies(candidates, historyOptions(input.sourceText)).catch(() => ({
+              state: 'error' as const,
+              items: [] as PastReply[],
+              next_cursor: null,
+            })),
+            qualifiedResourcesFor(input.sourceText, input.platform).catch(() => ({
+              items: [] as QualifiedResource[],
+              reason: 'lookup_failed' as const,
+            })),
+          ]);
+          return {
+            sessionId: existingSession.id,
+            sourcePostId: existingSession.source_post_id,
+            sourceVersion: existingSession.source_version,
+            contextVersion: 1,
+            editorVersion: existingSession.editor_version,
+            history: {
+              state: history.state,
+              items: history.items,
+              nextCursor: history.next_cursor,
+              reason:
+                history.state === 'error'
+                  ? 'lookup_failed'
+                  : history.items.length === 0
+                    ? 'no_match'
+                    : null,
+            },
+            resources: {
+              state:
+                resources.reason === 'lookup_failed'
+                  ? 'error'
+                  : resources.items.length > 0
+                    ? 'ready'
+                    : 'empty',
+              items: resources.items,
+              reason: resources.reason,
+            },
+          };
+        }
+
+        // The key is taken but names no readable session, so the first call is
+        // still in flight. Inserting now would create the duplicate above by a
+        // slower route; a conflict the caller can retry is the honest answer.
+        throw new AppError(
+          'idempotency_conflict',
+          'That request is still being processed. Try again in a moment.',
+        );
+      }
+
       const { data: sourceRow, error: sourceError } = await supabase
         .from('source_posts')
         .insert({
@@ -208,6 +365,7 @@ export function createSupabaseStore(session: OwnerSession): Store {
       const { data: sessionRow, error: sessionError } = await supabase
         .from('reply_sessions')
         .insert({
+          id: sessionId,
           user_id: userId,
           platform: input.platform,
           source_post_id: sourceRow.id,
@@ -222,12 +380,11 @@ export function createSupabaseStore(session: OwnerSession): Store {
       // Retrieval and resource qualification are independent, so a failure in one
       // never blanks the other (FR-05, D04).
       const [history, resources] = await Promise.all([
-        searchReplies(candidates, {
-          query: input.sourceText,
-          includeAiDrafts: false,
-          cursor: null,
-          limit: RETRIEVAL.initialResults,
-        }).catch(() => ({ state: 'error' as const, items: [] as PastReply[], next_cursor: null })),
+        searchReplies(candidates, historyOptions(input.sourceText)).catch(() => ({
+          state: 'error' as const,
+          items: [] as PastReply[],
+          next_cursor: null,
+        })),
         qualifiedResourcesFor(input.sourceText, input.platform).catch(() => ({
           items: [] as QualifiedResource[],
           reason: 'lookup_failed' as const,
@@ -264,39 +421,66 @@ export function createSupabaseStore(session: OwnerSession): Store {
       const session = await this.getSession(sessionId);
       if (!session) throw new AppError('not_found', 'That is not available.');
 
-      const { data: sourceRow } = await supabase
+      // Each read below decides for itself whether a failure is fatal, and says
+      // why. Destructuring `data` alone and letting `error` fall on the floor is
+      // what turned an unreadable source post into an empty <source> fence.
+      if (!session.source_post_id) {
+        throw new AppError('not_found', 'That is not available.');
+      }
+
+      const { data: sourceRow, error: sourceError } = await supabase
         .from('source_posts')
         .select('source_text, parent_text')
-        .eq('id', session.source_post_id ?? '')
+        .eq('id', session.source_post_id)
         .maybeSingle();
 
-      const sourceText = sourceRow?.source_text ?? '';
+      // Fatal. Generating from an empty source produces three confident ideas
+      // about a post the application never read, and nothing downstream can tell
+      // that apart from a genuinely short post (C08).
+      if (sourceError) {
+        throw new AppError('internal_error', 'Something went wrong. Your text is still here.');
+      }
+      const sourceText = (sourceRow?.source_text ?? '').trim() === '' ? null : sourceRow?.source_text;
+      if (!sourceText) {
+        throw new AppError('not_found', 'That is not available.');
+      }
 
-      const history = await searchReplies(candidates, {
-        query: sourceText,
-        includeAiDrafts: false,
-        cursor: null,
-        limit: RETRIEVAL.maxContextSnippets,
-      }).catch(() => ({ state: 'error' as const, items: [] as PastReply[], next_cursor: null }));
+      const history = await searchReplies(
+        candidates,
+        historyOptions(sourceText, RETRIEVAL.maxContextSnippets),
+      ).catch(() => ({ state: 'error' as const, items: [] as PastReply[], next_cursor: null }));
 
-      const { data: factRows } = await supabase
+      const { data: factRows, error: factError } = await supabase
         .from('facts')
         .select('id, version, fact_text, tags, approved, active, sensitivity, valid_from, valid_to')
         .eq('user_id', userId);
 
+      // Not fatal, and deliberately so. C06's fallback for having no suitable
+      // fact is practical advice with no first-person claim, which is exactly
+      // what an empty list produces. Unreadable facts can only make the reply
+      // more cautious, never less grounded.
       const now = new Date();
-      const eligible = (factRows ?? []).filter((row) => isEligibleForGeneration(row as never, now));
+      const eligible = (factError ? [] : (factRows ?? [])).filter((row) =>
+        isEligibleForGeneration(row as never, now),
+      );
       const relevant = selectRelevantFacts(eligible as never, { queryText: sourceText, limit: 3 }, now);
 
       const resources = await qualifiedResourcesFor(sourceText, session.platform);
 
-      const { data: recent } = await supabase
+      const { data: recent, error: recentError } = await supabase
         .from('reply_library')
         .select('final_text, posted_at, posted_date, date_precision')
         .eq('provenance', 'posted_confirmed')
         .is('withdrawn_at', null)
         .order('recorded_at', { ascending: false })
         .limit(10);
+
+      // Fatal, for the same reason `countGenerationRunsInLastHour` throws: this
+      // list is the only input to the near-verbatim repetition check, and an
+      // unreadable guard must not quietly become a disabled one (AI-04).
+      if (recentError) {
+        throw new AppError('internal_error', 'Something went wrong.');
+      }
 
       const seeds = history.items.filter((item) => seedReplyIds.includes(item.id));
       const rest = history.items.filter((item) => !seedReplyIds.includes(item.id));
@@ -309,7 +493,8 @@ export function createSupabaseStore(session: OwnerSession): Store {
           id: item.id,
           platform: item.platform,
           text: item.full_text,
-          posted_on: item.posted_at?.slice(0, 10) ?? item.posted_date,
+          // The owner's local day, not the UTC one (see localDay).
+          posted_on: item.posted_at ? localDay(item.posted_at, timezone) : item.posted_date,
         })),
         // buildFactContext throws if an ineligible fact reaches it, which is the
         // last line before private material would leave for a third party.
@@ -330,7 +515,7 @@ export function createSupabaseStore(session: OwnerSession): Store {
         })),
         recentReplies: (recent ?? []).map((row) => ({
           text: row.final_text,
-          posted_on: row.posted_at ? String(row.posted_at).slice(0, 10) : row.posted_date,
+          posted_on: row.posted_at ? localDay(String(row.posted_at), timezone) : row.posted_date,
         })),
       };
     },
@@ -467,15 +652,7 @@ export function createSupabaseStore(session: OwnerSession): Store {
     },
 
     async searchLibrary(input: LibrarySearchInput) {
-      const result = await searchReplies(candidates, {
-        query: input.query,
-        ...(input.platforms ? { platforms: input.platforms } : {}),
-        ...(input.provenances ? { provenances: input.provenances } : {}),
-        includeAiDrafts: true,
-        includeUnknownDates: input.includeUnknownDates,
-        cursor: input.cursor,
-        limit: input.limit,
-      });
+      const result = await searchReplies(candidates, librarySearchOptions(input));
       return {
         state: result.state,
         items: result.items,
@@ -493,6 +670,106 @@ export function createSupabaseStore(session: OwnerSession): Store {
         .limit(20);
       const now = new Date();
       return (data ?? []).some((row) => isEligibleForGeneration(row as never, now));
+    },
+
+    async listResources(): Promise<AdminResource[]> {
+      const { data, error } = await supabase
+        .from('resources')
+        .select('*')
+        .order('title_en', { ascending: true });
+      if (error) throw new AppError('internal_error', 'Something went wrong.');
+      return (data ?? []) as AdminResource[];
+    },
+
+    async saveResource({ id, expectedVersion, fields }) {
+      if (id === null) {
+        const { data, error } = await supabase
+          .from('resources')
+          .insert({ ...fields, user_id: userId })
+          .select('id, version')
+          .single();
+        if (error || !data) throw new AppError('validation_failed', 'That resource could not be saved.');
+        return { id: data.id, version: data.version };
+      }
+
+      // The version predicate is the conflict check: a stale form does not match,
+      // so the newer row survives untouched rather than being overwritten (UTIL-01).
+      const { data, error } = await supabase
+        .from('resources')
+        .update({ ...fields, version: (expectedVersion ?? 0) + 1 })
+        .eq('id', id)
+        .eq('version', expectedVersion)
+        .select('id, version')
+        .maybeSingle();
+      if (error || !data) {
+        throw new AppError('version_conflict', 'This changed somewhere else. Reload before saving.');
+      }
+      return { id: data.id, version: data.version };
+    },
+
+    async listFacts(): Promise<AdminFact[]> {
+      const { data, error } = await supabase
+        .from('facts')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw new AppError('internal_error', 'Something went wrong.');
+
+      const now = new Date();
+      return (data ?? []).map((row) => {
+        const reason = eligibilityReason(row as never, now);
+        return {
+          ...(row as unknown as AdminFact),
+          eligible: reason === 'eligible',
+          ineligible_reason: reason === 'eligible' ? null : reason,
+        };
+      });
+    },
+
+    async saveFact({ id, expectedVersion, fields }) {
+      if (id === null) {
+        const { data, error } = await supabase
+          .from('facts')
+          .insert({ ...fields, user_id: userId })
+          .select('id, version')
+          .single();
+        if (error || !data) throw new AppError('validation_failed', 'That fact could not be saved.');
+        return { id: data.id, version: data.version };
+      }
+
+      const { data, error } = await supabase
+        .from('facts')
+        .update({ ...fields, version: (expectedVersion ?? 0) + 1 })
+        .eq('id', id)
+        .eq('version', expectedVersion)
+        .select('id, version')
+        .maybeSingle();
+      if (error || !data) {
+        throw new AppError('version_conflict', 'This changed somewhere else. Reload before saving.');
+      }
+      return { id: data.id, version: data.version };
+    },
+
+    async getSettings(): Promise<AdminSettings> {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('target_linkedin, target_x, target_threads, timezone')
+        .maybeSingle();
+      return (
+        (data as AdminSettings | null) ?? {
+          target_linkedin: APP.defaultDailyTarget,
+          target_x: APP.defaultDailyTarget,
+          target_threads: APP.defaultDailyTarget,
+          timezone: APP.defaultTimezone,
+        }
+      );
+    },
+
+    async saveSettings(settings) {
+      const { error } = await supabase
+        .from('app_settings')
+        .upsert({ ...settings, user_id: userId }, { onConflict: 'user_id' });
+      if (error) throw new AppError('validation_failed', 'Those settings could not be saved.');
+      return settings;
     },
   };
 }
