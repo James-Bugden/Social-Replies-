@@ -45,6 +45,7 @@ export function FormatToolbar({ textarea, text, platform, onChange }: FormatTool
   const length = platformLength(text);
   const limit = REPLY_LIMIT[platform];
   const platformName = PLATFORM_LABELS[platform];
+  const hasStyledLetters = toPlain(text) !== text;
 
   function apply(scope: 'selection' | 'lines', fn: (s: string) => string) {
     const el = textarea.current;
@@ -118,7 +119,10 @@ export function FormatToolbar({ textarea, text, platform, onChange }: FormatTool
         </div>
       ) : null}
 
-      <Meta>{FORMAT.note}</Meta>
+      {/* Only once styled letters are actually present. Shown all the time it
+          took two lines above the editor on a phone, warning about something
+          the owner had not done. */}
+      {hasStyledLetters ? <Meta>{FORMAT.note}</Meta> : null}
     </div>
   );
 }

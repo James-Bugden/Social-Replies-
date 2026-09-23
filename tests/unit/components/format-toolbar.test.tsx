@@ -80,6 +80,13 @@ describe('the formatting toolbar', () => {
   it('says nothing about plain text', () => {
     render(<Harness text="Plain reply, nothing to fix." onChange={vi.fn()} />);
     expect(screen.queryByRole('status')).toBeNull();
+    // Nor the screen-reader note, which is about styled letters that are not there.
+    expect(screen.queryByText(/Screen readers may spell them out/)).toBeNull();
+  });
+
+  it('explains the screen-reader cost once styled letters are present', () => {
+    render(<Harness text={`Ask for ${toBold('the range')}`} onChange={vi.fn()} />);
+    expect(screen.getByText(/Screen readers may spell them out/)).toBeTruthy();
   });
 
   it('counts against the reply limit for the platform, and says when it is over', () => {
