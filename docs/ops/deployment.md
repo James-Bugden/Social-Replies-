@@ -12,11 +12,33 @@ Everything else is already done and is marked as such.
 |---|---|
 | Database schema, policies, functions | **Applied** to the Supabase project `Career` (`avpntrdnqlrjfmfdagfj`, ap-southeast-2) |
 | Anonymous access | Revoked on every table and every function; verified by query, not by assumption |
-| pgvector column and index | Created on the hosted project. **Never exercised** by any test |
-| Owner record in `private.app_owner` | **Not created.** Needs an auth user first |
-| Vercel project | **Not created** |
-| `replies.jamesbugden.com` | **Not attached** |
+| pgvector column and index | Created on the hosted project. The type, the `extensions.vector` cast, the HNSW index and the `<=>` operator were checked directly on 2026-09-23 and behave. **Still never exercised against a real row**, because there are none |
+| Owner record in `private.app_owner` | **Created** 2026-09-23. One enabled owner, matching the single auth user. Verified by assuming that user's claims in a rolled-back transaction: `is_app_owner()` returns true and the owner can read the tables |
+| Vercel project | **Not created.** Blocked: the Vercel MCP token is not authorised for the team that holds the account (`403`, scope `james-projects-1242b366`), and the local Vercel CLI token is rejected. Both need an owner sign-in |
+| `replies.jamesbugden.com` | **Not attached**, and the record does not go where the earlier draft of this runbook assumed. See DNS below |
 | Provider credentials | **Not set.** The app runs without them and says so |
+
+### Where the DNS actually is
+
+Measured on 2026-09-23 rather than assumed:
+
+```
+jamesbugden.com.        NS   dns1.registrar-servers.com, dns2.registrar-servers.com
+jamesbugden.com.        A    185.158.133.1
+jamesbugden.com.        MX   1 smtp.google.com
+replies.jamesbugden.com          does not exist
+```
+
+The nameservers are **Namecheap's**, not Vercel's and not Cloudflare's. So
+attaching the subdomain is two separate acts in two separate places: add the
+domain to the Vercel project, then add the record Vercel asks for in
+**Namecheap's** DNS panel. A runbook step that says only "add the domain in
+Vercel" will strand you.
+
+Two records on that zone must not be touched. The root `A` record is the live
+website, and the `MX` record points at Google Workspace, which is the owner's
+mail. Adding a `replies` record does not affect either, but editing the zone by
+hand next to them is where mail gets lost.
 
 The project is `Career` rather than a new one because a new project in this
 organisation costs 10 USD per month and `Career` was completely empty: zero public
@@ -26,7 +48,14 @@ to any empty Postgres.
 
 ## Owner-only steps
 
-### 1. Create the owner's auth user
+### 1. Create the owner's auth user -- DONE 2026-09-23
+
+Left here as the record of what was done, not as a step to repeat. One auth user
+exists, sign-ups are off, and one enabled row in `private.app_owner` matches it.
+The insert selected the id by email rather than quoting it, so the owner's auth
+user id is in the database and nowhere else, which is what C01 asks for.
+
+The original wording of this step:
 
 In the Supabase dashboard for the project, under Authentication, create exactly one
 user with the address that will sign in. Do not enable sign-ups.
