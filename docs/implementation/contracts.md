@@ -121,7 +121,7 @@ Unified error envelope: `{ code, message, retryable, request_id, retry_after_sec
 
 ## C08. Generation, cost and untrusted text
 
-Implement one selected paid provider adapter plus a fake adapter behind ReplyGenerator. Do not build three production providers or a model picker just to satisfy an abstraction. First Mate verifies supported model IDs/pricing from official provider material and runs the private quality benchmark before selecting the deployed model. Earlier conversational model prices and agent-hour estimates are not verified implementation facts.
+Implement one selected paid provider adapter plus a fake adapter behind ReplyGenerator. Do not build three production providers or a model picker just to satisfy an abstraction. The active coding agent verifies supported model IDs/pricing from official provider material and runs the private quality benchmark before selecting the deployed model. Earlier conversational model prices and agent-hour estimates are not verified implementation facts.
 
 Normal success: one model request produces three alternatives. Use a bounded context of compact canonical rules, platform rules, eligible writing/facts/resources and the current source. Imported/source text is untrusted quoted data, never instructions. The generation service has no social-posting, browsing, shell, secret-reading or arbitrary tool capabilities. Limit concurrency and usage server-side, not just in the UI.
 
