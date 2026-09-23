@@ -33,3 +33,7 @@ temp/
 .DS_Store
 .idea/
 .vscode/*.local.*
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
+*.tsbuildinfo

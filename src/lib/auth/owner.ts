@@ -8,7 +8,7 @@ import { AppError } from '@/lib/contracts/errors';
  *
  * Two checks, both required. The session must be a real verified session, and it
  * must belong to the one enabled owner. The database enforces the same pair, so
- * this layer is a fast, clear rejection rather than the only line of defence —
+ * this layer is a fast, clear rejection rather than the only line of defence:
  * a route that forgot to call it still cannot read a row.
  */
 

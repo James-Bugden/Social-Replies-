@@ -1,0 +1,283 @@
+# Quality campaign ledger
+
+SR-019 (#20). One row per test ID from `acceptance-matrix.md`, with what was
+actually run and what it does not cover.
+
+**A skipped, blocked or inconclusive check is not a pass.** Rows below say
+`pass`, `partial`, `pending` or `blocked`, and every row that is not `pass`
+names what is missing.
+
+Environment unless a row says otherwise: Windows 11, Node 24.15.0, PGlite 0.5.8
+(Postgres in WebAssembly, **no pgvector**), Playwright 1.63 Chromium, the app in
+fake-provider mode with synthetic data. Hosted checks ran against the Supabase
+project the deployment runbook names.
+
+```
+npm run typecheck      clean
+npm run lint           clean
+npm run check:private  clean
+npm run check:secrets  clean
+npm test               562 passed (38 files)
+npm run test:e2e       68 passed across narrow-600 and wide-1280
+```
+
+Run on 2026-09-23 against the content of PR #26, which is the whole stack
+rebased onto `main`. A commit hash is deliberately not quoted here: every merge
+in this stack is a squash, so the hash the tests actually ran at stops existing
+the moment the branch lands, and a ledger citing a dead hash is worse than one
+citing none. Earlier revisions recorded 541 and 58, which were that day's real
+numbers rather than this day's.
+
+Hosted state re-verified the same day against the `Career` project
+(`ap-southeast-2`), after the merge: all 8 migrations present, `auth.users`
+empty, and an anonymous caller holding the publishable key gets **401 on all
+eight probed tables and on `is_app_owner`**, while `/auth/v1/health` answers
+200. The key is therefore live and RLS is what is refusing, rather than the
+request failing to arrive.
+
+## What this campaign cannot tell you
+
+Four gaps run through every row below. They are listed once here rather than
+repeated as an excuse in each row.
+
+1. **No pgvector locally, and no rows anywhere.** PGlite has no vector extension,
+   so nothing in the local suite touches the vector column, the HNSW index,
+   `semantic.ts` or `applyVector`. Retrieval is verified lexically only.
+
+   Three parts of that were checked directly against hosted Postgres on
+   2026-09-23 and are no longer unknown. pgvector is installed in the
+   `extensions` schema, which is what `semantic.ts` casts to, so the
+   `$1::extensions.vector` in that file resolves rather than being the kind of
+   SQL that could never run -- a bug this project has already had once, in the
+   retrieval builders. The column is `vector(1536)` and the HNSW index
+   `search_documents_embedding_cosine` exists. The app's semantic query shape
+   plans successfully against the live schema, and the `<=>` operator with the
+   `1 - distance` score returns 1.0000, 0.7071 and 0.0000 for vectors chosen to
+   produce exactly those, in the right order.
+
+   What that is **not**: the query has still never run against a real row. Both
+   `search_documents` and `reply_library` cascade from `auth.users`, which is
+   empty, and populating it would mean creating an account. So the HNSW index has
+   never served a query, `applyVector` has never executed, and **any claim about
+   semantic ranking quality remains unfounded.** The operator arithmetic is
+   confirmed; the retrieval is not.
+2. **No live model.** Every generation test uses the fake adapter. The guards,
+   budgets and failure paths are real; the *output quality*, the Taiwan Chinese
+   fluency and the injection resistance of an actual model are not measured.
+3. **No real corpus.** No authorised export has been inspected, so every import
+   adapter is synthetic-tested and no real backfill has happened.
+4. **No deployed build.** Nothing here was run against a promoted deployment, a
+   real clipboard on a real device, or a physical iPhone.
+
+## Security and data
+
+| ID | Result | Evidence and limits |
+|---|---|---|
+| SEC-01 | **pass** (local) / **pass for anonymous, partial for a second account** (hosted) | 17 tests. Table list read from `pg_tables`, not hard-coded, so a new table with no policy fails the suite. Anonymous gets `permission denied` on all 14 tables; a second authenticated user reads 0 rows from all 14 and cannot insert rows it claims to own; disabling the owner record revokes access immediately; a second enabled owner cannot be created. Hosted, through the real PostgREST API rather than by reading the schema: an anonymous caller carrying the project's publishable key gets **401 on every table** (`reply_library`, `facts`, `resources`, `reply_sessions`, `mutation_keys`, `search_documents`, `source_posts`), **401** on `is_app_owner` and `daily_counts`, and **404** on the retrieval functions, which are not exposed at all. Grants and policy counts also verified by query: 14 tables, 14 with forced RLS, 56 policies, 0 anon grants. **Still missing: the same probe as a second authenticated account**, which needs a real auth user and belongs to #21 |
+| SEC-02 | **pass** | Composite foreign keys reject a cross-owner parent with `23503`; RLS `WITH CHECK` rejects an insert or update that claims another `user_id`. Same-origin enforcement now has 15 tests covering cross-site, lookalike subdomain, subdomain, plain-http, null and malformed origins, every mutating method, and the proxy protocol header. **It had none until an adversarial review mutated it to a no-op and watched every test stay green**, and writing them found that it compared hosts rather than origins. A cross-origin attempt from a real browser is still not covered |
+| SEC-03 | **pass** | 12 tests. A synthetic sentinel and seven credential shapes are planted in a temp directory outside the repo and each is detected; the scanner never prints the matched value; a clean directory passes. **GitHub's own secret-scanning toggle is an account setting and is not asserted enabled by anything here** |
+| SEC-04 | **partial** | Architectural: a boundary test asserts no provider adapter defines a tool, a `tool_choice` or a `function_call`, and that only the Anthropic adapter reaches the network. The prompt fences untrusted blocks with a nonce the pasted text cannot predict, proven by a test that tries to close the fence early. **Not covered: whether a real model obeys any of it.** The fake ignores instructions, so it cannot refute them |
+| SEC-05 | **pass** (was wrong twice) | `Cache-Control: private, no-store` verified on a live response in the browser suite. Library search is a POST so the query never enters a URL. The logout clause was recorded as not applicable on the grounds that tab-local recovery was not implemented. **It was implemented**, in `recovery.ts`, and wired into the workspace; that row was simply stale. Re-checking it found the real gap: the app had **no sign-out at all**, so the matrix's "explicit logout clears tab-local recovery" could never have passed, and `recovery.ts` meanwhile documented itself as cleared "on Next reply, on an explicit discard, and on sign-out" when only the first existed. Sign-out now exists on Settings, clears the draft **before** the network call and regardless of its outcome, and is covered by three tests, all three watched failing with the clearing line removed |
+| DATA-01 | **pass** | Migrations applied to two independent fresh databases; column-by-column signatures identical. The vector migration is recorded as **skipped** with its reason rather than silently passing, and a test asserts it was skipped so the suite cannot imply coverage it lacks |
+
+## Imports
+
+| ID | Result | Evidence and limits |
+|---|---|---|
+| IMP-01 | **pass** | Rerunning a completed batch restarts from ordinal 0 rather than trusting the checkpoint, so every record is re-identified: a checkpoint that skipped the work would make the import *look* idempotent without testing whether it is. A native reply id arriving from a second export reconciles into one record keeping both source references and the stronger proven status |
+| IMP-02 | **pass** | Identical wording under two different target posts stays two records. Proven by mutation: adding a `content_hash` lookup to the duplicate check made this fail |
+| IMP-03 | **pass** | Unknown, date-only-unzoned, known-UTC and a year-old archive imported today, proven against `public.daily_counts`. An unknown date never counts and a date-only record whose source timezone is not the counting timezone is excluded, because its Taipei day is unproven. Proven by mutation: defaulting an unknown date to the import clock made IMP-03 and IMP-05 fail |
+| IMP-04 | **pass** | Malformed CSV and JSONL with surviving neighbours, a JavaScript archive wrapper, an unknown schema, path traversal, a symlink entry, an executable entry, an oversize file, a decompression bomb, and an interrupted batch resumed from its checkpoint. The JavaScript wrapper case asserts a `globalThis` marker is untouched **first**, so an early return cannot skip the assertion that matters |
+| IMP-05 | **pass** | A source with no parent text and no publication proof keeps null context and honest provenance, with no promotion from `ai_draft` to posted |
+
+## Retrieval
+
+| ID | Result | Evidence and limits |
+|---|---|---|
+| RET-01 | **pass** (lexical) | 40-row synthetic bilingual corpus. English, Traditional Chinese, short-keyword and cross-language queries all return relevant older writing. The anti-recency case is constructed so that a recency-first ordering would return something different, and asserts the counterfactual. Cursor pages are stable with no duplicates, and a cursor from a different query is rejected rather than interleaved. **Semantic ranking is unverified** |
+| RET-02 | **pass** | A reply saved while the embedder is `unconfigured` is lexically findable immediately; the job survives; the save is never rolled back by an embedding failure |
+| RET-03 | **partial** | A stale job cannot overwrite a newer correction, proven at the pre-check. The atomic `and text_hash = ...` guard inside the UPDATE has **never executed**, because applying a vector requires pgvector and the hosted database has no rows to apply one to. Confirmed on hosted Postgres that the type, column, index and operator the guard depends on all exist and behave, which removes "the feature is impossible here" as an explanation but leaves the guard itself untested. Withdrawn and ineligible rows are filtered before candidate selection, not after |
+| RET-04 | **pass** | A history containing only AI drafts returns empty rather than "you replied before"; drafts and main posts carry their true provenance to the UI; a component test asserts the confirmed heading appears only when every row is a confirmed reply |
+
+## Resources and facts
+
+| ID | Result | Evidence and limits |
+|---|---|---|
+| RES-01 | **pass** | Relevance qualifies before ownership preference, so a low-relevance owned guide cannot displace advice-only output. Inactive, unverified and wrong-platform records are excluded. Maximum three |
+| RES-02 | **pass** | Rejected at the database and in the resolver: `javascript:`, `data:`, protocol-relative, plain http, embedded credentials, backslash ambiguity and a scheme smuggled into a path. The model supplies an id; the server resolves the URL |
+| RES-03 | **pass** | No-match, empty catalogue and lookup failure are three distinct API states and three distinct screens, asserted at the component level. A missing Chinese page is labelled an English resource rather than given a guessed path |
+| RES-04 | **pass** | Reducer tests: re-adding is a no-op, a second resource previews a replacement instead of stacking links, removing an untouched block is exact, and removing an **edited** block previews instead of deleting the owner's words |
+| FACT-01 | **pass** (eligibility) / **partial** (semantics) | Four independent gates with the specific failing reason; boundary-inclusive validity dates; `buildFactContext` throws on an ineligible fact and never carries `source_reference`. Semantic faithfulness is checked heuristically by the grounding guard; a model's ability to evade those heuristics is unmeasured |
+
+## Generation
+
+| ID | Result | Evidence and limits |
+|---|---|---|
+| AI-01 | **pass** (structure) | Malformed JSON, a missing idea, a fourth idea, duplicate positions, a missing field, duplicate ideas and a missing Chinese meaning all fail safely after exactly one shared repair. Failure detail never echoes the response text |
+| AI-02 | **pass** | Timeout aborts at the deadline; 429 with a short Retry-After waits once and retries; 429 with a long one returns immediately rather than sitting out the budget; budget exhaustion stops before any call; the hourly limit refuses before the provider is touched; no implicit provider fallback. Assertions are on the **number of provider calls**, because an extra repair is invisible except in the bill |
+| AI-03 | **partial** | British English, Taiwan terminology and AI-tell warnings are implemented and unit-covered against fixtures. **No Taiwan-Chinese review by a person and no private benchmark have happened**, so fluency is unmeasured |
+| AI-04 | **pass** (rules) | Similar advice in different words is allowed; near-verbatim reuse warns with a real date, or says the date is unknown rather than inventing "12 days ago"; three paraphrases sold as three alternatives is a hard failure |
+
+## Interface
+
+| ID | Result | Evidence and limits |
+|---|---|---|
+| UX-01 | **pass** | No horizontal overflow at 375, 500, 600, 750 and 1280 CSS px, nor at a halved viewport standing in for 200% zoom. Resources appear in the reading order between past replies and ideas, verified by reading the heading order rather than by looking at a screenshot |
+| UX-02 | **partial** | Ctrl+Enter submits; an Enter with `isComposing` set does **not**, so an IME candidate commit cannot fire a request; background results do not steal focus; the Add past reply dialog returns focus to its trigger and Escape closes it without discarding the draft. **Not covered: a full keyboard-only traversal by a person, and a real IME** |
+| UX-03 | **pass** | A late result for an older source version is discarded; typing drops a pending proposal; a proposal from a stale editor version is ignored; a lower editor version from the server is ignored; paginating history leaves the draft alone |
+| UX-04 | **pass** | Selecting an idea over a dirty editor previews rather than replaces; Keep my reply preserves the exact text including trailing spaces; Undo restores the previous version |
+| ZH-01 | **pass** | Editing Chinese, inserting a resource and accepting a rewrite each mark the English meaning stale immediately; a translation that arrives for text that has since changed is discarded; a translation failure does not disable copy or save. Verified in the reducer and again in the browser |
+
+## Recording
+
+| ID | Result | Evidence and limits |
+|---|---|---|
+| COPY-01 | **partial** | The browser suite grants clipboard permission and asserts the copied text matches the editor exactly, and that copying does not move the count. The denied path selects the text and never claims success, implemented and unit-reasoned. **Not covered: a real permission prompt on a real device** |
+| SAVE-01 | **pass** | Exact Unicode round-trips: CJK, emoji, tabs, trailing spaces and blank lines. An all-whitespace reply is rejected by a check constraint rather than trimmed, so the database never rewrites text |
+| SAVE-02 | **pass** | Same key with the same payload replays; same key with different text is a conflict; a second key for an already-recorded session returns the existing record; a second key with different text is refused. In every case exactly one reply exists |
+| SAVE-03 | **pass** | A failure inside the transaction rolls back the mutation key, the reply and the embedding job together, asserted by counting rows afterwards. An embedding outage leaves the save and lexical search working |
+| DAY-01 | **pass** | 23:59:59 and 00:00:00 Taipei land on the days a person would name; the process timezone does not affect the answer; 11 replies display as 11/10 rather than clamped; drafts, main posts, AI drafts and withdrawn rows never count |
+| DAY-02 | **pass** | A correction appends a private revision and adds no event, so the count does not move; a stale revision is refused; withdrawal removes the count while the record stays, and the copy says plainly that the social platform is untouched |
+
+## Utilities and deployment
+
+| ID | Result | Evidence and limits |
+|---|---|---|
+| UTIL-01 | **pass** | Resource and fact create, edit and disable; a stale `expected_version` shows a conflict and the typed text survives; a fact created through the interface comes back unapproved and marked excluded from generation; a private-only fact stays excluded even once approved and active; disabling a resource removes it from what a new reply can offer; every navigation link reaches a page that renders |
+| DEP-01 | **pending** | No deployment exists. The procedure is in `docs/ops/deployment.md` |
+| DEP-02 | **pending** | Requires a promoted build |
+
+## Performance
+
+Measured, not asserted. 10,000 synthetic rows, PGlite in WebAssembly, one
+developer machine:
+
+```
+seed=2662ms cold=3329ms warm=3186ms fulltext=725ms trigram+containment=2042ms
+```
+
+No threshold is asserted anywhere in the suite. The split is the useful part:
+containment and `word_similarity` cannot use the GIN index as currently written,
+so they scan. **This must be re-measured on hosted Postgres**, probably with a
+`%` operator prefilter, before any latency claim is made.
+
+## AI evaluation
+
+**Not started.** `PRIVATE_EVAL_SET_PATH` is unset and no historical pairs exist
+yet, because no export has been imported. Until that happens there is no measured
+statement about voice, usefulness, Taiwan fluency, resource relevance, unsupported
+claims or editing burden, and none should be made.
+
+The release gate of zero observed unsupported facts or URLs on the evaluation set
+is therefore **not met**, because the set does not exist. That is a gap, not a pass.
+
+## T2 visual and copy review
+
+Done on 2026-09-23 by actually looking at the running app in a browser at 600 px,
+in test mode, rather than by reading the DOM. That distinction is the point of
+T2, and it earned its keep immediately.
+
+**One defect found, which every automated check had passed over.** `IdeasState`
+has four states and `IdeasSection` rendered three of them. `idle` had no branch,
+so from page load until the owner pressed the button the Reply ideas section was
+a heading with nothing underneath it. Both sections above it explain their own
+emptiness (`No matching past replies yet.`, `Nothing worth linking for this
+one.`), and the component's own docstring argues that a card-shaped hole wrongly
+implies text is coming. A heading over nothing makes the same promise. Fixed
+with `No reply ideas yet.`, matching the two siblings, and covered by a test
+that was watched failing first.
+
+No suite could have caught this. Every existing ideas test constructs a
+`loading`, `failed` or `ready` state, because those are the states a test author
+thinks to write. Nobody renders the state the component starts in.
+
+The same class of fault was then looked for everywhere else rather than left as
+one anecdote. Each discriminated union in the reducer was compared against the
+branches its component actually renders. `FinalReplyEditor` covers all five of
+its states. `ActionStrip` appears to skip `idle`, but does not: idle is the
+resting presentation, the two buttons and the line beneath them, so there is
+nothing unsaid. `IdeasSection` was the only component with a state that reached
+the screen as silence.
+
+**One thing that looked wrong and was not.** `Your reply` appears twice in the
+accessibility tree, as an `h2` and again as a `label`. The label is `sr-only`,
+so this is a visible heading for navigation plus an accessible name for the
+field, which is the correct pattern. Checking before changing it is the only
+reason it is still correct.
+
+**What this review did not cover.** Wide desktop was attempted and abandoned: the
+preview pane could not render a faithful 1280 px viewport, scaling it into an
+800 px frame instead, so no visual judgement about wide layout is recorded here.
+The browser journeys do assert no horizontal overflow at 1280, which is a
+different and weaker claim than having looked at it. Chinese rendering, real IME
+behaviour and physical devices remain T3/T4 and remain undone.
+
+## What the adversarial round found after all of this was green
+
+Four refuting lenses ran over the whole branch after the suite reported 437 unit
+tests and 58 browser journeys passing: end-to-end chain, privacy and auth abuse,
+test integrity by mutation, and claims against evidence. Each finding was then
+verified by a separate agent that tried to refute it.
+
+**Twenty-two defects were confirmed.** That is the argument for running this round
+at all: every one of them survived a green suite, and several survived because the
+test that was supposed to catch them could not fail.
+
+All twenty-two are fixed. Each fix was proved by reverting it, watching the new
+test go red, and restoring it, so no fix here rests on a test that has only ever
+been green. Three more defects were found while writing those tests: the origin
+check compared hosts rather than origins, so `http://app` counted as same-origin
+with `https://app`; `analyse` claimed its idempotency key before the inserts and
+wrote the result afterwards, so a retry mid-flight created a second session; and
+the embedding worker had no owner predicate at all, so it would have embedded
+every account's rows over an admin connection.
+
+Rows in this ledger that were wrong, and are now corrected below: UX-03 claimed
+drafts survive navigation, SEC-02 claimed same-origin enforcement was unit-covered
+when no test imported it, RET-04 cited a browser journey that executed zero
+assertions, and ZH-01 claimed the staleness guard was verified in the browser when
+the guard could not fire.
+
+The five that would have shown the owner something untrue:
+
+1. **Undo recorded status was a no-op.** Press it, believe the recording is
+   reversed, and nothing moves.
+2. **The English meaning staleness guard could never fire**, because the value it
+   compared was captured before the text changed. The English of replaced Chinese
+   displayed as current, on the screen whose only job is checking what is about to
+   be posted.
+3. **Leaving the workspace destroyed the reply**, while a comment, D14 and this
+   ledger all said otherwise.
+4. **Refine output bypassed every guard**, so a rewrite could carry an invented
+   figure or a raw URL straight into the editor.
+5. **Every displayed date was the UTC date**, so a reply posted at 00:30 Taipei was
+   counted as today and displayed as yesterday.
+
+## Accepted hosted advisor findings
+
+Run after the last migration. The `anon` finding that started this list is gone.
+Three remain, and all three are deliberate. They are recorded here with reasons so
+that a later reader can tell a decision from an oversight.
+
+| Finding | Why it stays |
+|---|---|
+| `private.app_owner` has RLS enabled with no policy | That is the mechanism. RLS with zero policies denies every non-superuser, which is exactly what this table needs. A policy would be a way in |
+| 14 tables in `public` are visible in the GraphQL schema to `authenticated` | RLS restricts the rows, and this app has exactly one legitimate authenticated account. A second account can enumerate table *names* and read nothing, which is the boundary C01 asks for. Revoking SELECT from `authenticated` would break the owner's own session |
+| `public.is_app_owner()` is executable by `authenticated` as SECURITY DEFINER | Intentional, and it is the entire public surface of the `private` schema. It takes no arguments, returns one boolean, cannot name a row and cannot mutate the owner. It is SECURITY DEFINER precisely so that `authenticated` needs no USAGE on `private` at all |
+
+## Defects found and fixed during the campaign
+
+| Found by | Defect | Fix |
+|---|---|---|
+| Hosted security advisor | `public.is_app_owner()` was callable by `anon`. Supabase grants EXECUTE on every new public function to `anon`, and revoking from `PUBLIC` does not undo a direct grant. Every local test was green | Every function revokes `anon` by name; the local harness now applies Supabase's default privileges so a test can catch it |
+| Fact bank implementation | `factUpdateSchema.changes` used `.partial()` on a schema with defaults, so omitting a key parsed into that key's default. A partial update would have silently reset a fact to private | Update schemas describe optional fields with no defaults; regression test verified by reverting the fix |
+| Retrieval implementation | pg_trgm cannot match short Chinese. `word_similarity('面試', '今天分享一個面試準備的技巧')` is exactly 0 on PGlite **and** on hosted Postgres | Containment added beside trigram matching as a first-class signal |
+| Integration | Retrieval SQL assembled in TypeScript could never run in production, because PostgREST has no raw-SQL channel | Two Postgres functions, called by SQL from the harness and by `rpc()` from the app |
+| Self-review after that refactor | The retrieval tests still imported the old inline builders, so they would have stayed green while the production path went untested | The builders delegate to the same functions, so there is one definition |
+| Browser journeys | The page and the API received different instances of the in-memory test double, because Next bundles server components and route handlers separately | The double is held on `globalThis` |
+| A browser journey, via a log line that did not exist | **`instanceof AppError` is false across Turbopack chunks.** Next gives a server component and a route handler separate copies of the module, so an error thrown inside a store the *page* constructed is not `instanceof` the class a *route* imports. Every deliberate 409, 401 and 429 raised on that path collapsed into an unexplained 500. It looked fine under curl, because a curl request constructed the store from a route chunk | `AppError` carries a `Symbol.for` brand, which is the same brand in every copy, and `isAppError` replaces every `instanceof`. A boundary test forbids the old form. `toErrorResponse` now logs unexpected failures with a request id, because a 500 that leaves no trace is what made this expensive to find |
+| CI, not a local run | **The browser journeys were order-dependent.** The test double is a singleton shared by both viewport projects, so the second inherited every fact created and every resource disabled by the first. Worse, its seed resources were a module-level array that `saveResource` mutated, so even a reset handed back a "fresh" store over edited data. Each file passed alone and the suite failed as a whole | Each journey resets through a route that 404s outside `SR_TEST_MODE=e2e`, and the store copies its seeds per instance. A boundary test asserts every route under `api/test` checks the switch, and fails if that directory is ever empty rather than passing over nothing |
+| CI, not a local run | The action strip height assertion read once, but the measurement is written by a ResizeObserver that fires after the paint. It raced | The assertion polls |
+| Re-reading a ledger row instead of trusting it | The app had no sign-out anywhere, so SEC-05's "explicit logout clears tab-local recovery" was unmeetable. `recovery.ts` separately claimed it was cleared on an explicit discard and on sign-out; neither control existed | `SignOutButton` on Settings, clearing the draft before and regardless of the session call; docstring corrected to what the code does |
+| T2 visual review | The Reply ideas section rendered nothing at all in its `idle` state, so it was a bare heading until the owner pressed the button, while both sections above it explained their emptiness | `IDEAS.idle` added and rendered; regression test watched failing first |
+| Browser journeys | The test double kept English stopwords, so a nonsense query still matched every reply containing "the". A no-match assertion would have passed for the wrong reason | The double drops stopwords, as Postgres full-text search does |
