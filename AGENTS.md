@@ -2,7 +2,7 @@
 
 This file is the canonical tool-neutral engineering policy for this repository.
 Claude, Codex, Orca, or another capable coding agent may drive the workflow.
-No step depends on First Mate.
+The workflow does not depend on a specific orchestrator.
 
 ## Read before editing
 
