@@ -1,4 +1,4 @@
-# Social Replies: scope audit and First Mate handover
+# Social Replies: scope audit and implementation handover
 
 Date: 2026-09-22. Repository: https://github.com/James-Bugden/Social-Replies-
 
@@ -51,7 +51,7 @@ The live issue index links every issue. Checkbox state refers to completed imple
 
 ## Corrections verified during the final pass
 
-1. Research is delivered, not left as a task telling First Mate to use Mobbin. Issue #3 now links the actual committed report, interaction contract and comparison.
+1. Research is delivered, not left as a task telling the implementation agent to use Mobbin. Issue #3 now links the actual committed report, interaction contract and comparison.
 2. Old research.md/directions.html links and conflicting design letters in the research handoff were corrected. Current recommendation is compact reference-first, B in the committed comparison. It is not claimed as owner approval.
 3. The short issue-bootstrap manifest was replaced by an index of the complete live briefs and integration dependencies. The epic now marks research complete and links the current contracts.
 4. The schema uses a single provenance/date/evidence vocabulary. Resource origin is separate from app origin. Unknown historical dates are not fabricated as today.
@@ -67,7 +67,7 @@ Buffer informs contextual rewrites and explicit proposal acceptance. Superhuman 
 
 No paid screenshots, expiring image URLs or private Drive exports are republished. A screenshot is not proof of backend persistence, accessible interaction or productivity improvements.
 
-## First Mate: start here
+## Implementation agent: start here
 
 Read AGENTS.md, the current product specification, the issue index and the linked contracts. Consume completed research #3. Begin #2 and the synthetic component work in #4; do not wait for production API keys to make a prototype or typed fake service.
 
@@ -81,4 +81,4 @@ Do not change Soar production, root-domain/mail DNS, paid account settings or pr
 
 No production application, live historical backfill, actual owner authentication, private model-quality benchmark, Orca review, real HTTPS clipboard/device verification, deployed security configuration or production rollout is claimed complete by this scoping handover. Those remain explicitly owned by the open implementation/verification issues.
 
-No reliable elapsed-time promise is made. First Mate should measure the first slice and report real blockers rather than treating earlier speculative hour estimates as a deadline.
+No reliable elapsed-time promise is made. The active coding agent should measure the first slice and report real blockers rather than treating earlier speculative hour estimates as a deadline.
