@@ -42,7 +42,7 @@ Compact reference-first is the selected default, labelled B in the current compa
 
 Foundation and design-validation work can start together. Schema then unlocks registry, facts and importer primitives. Retrieval/provider/UI can advance against shared fake contracts. QA owns a separate campaign ledger and continues independent tests while fix workers work. The public issue evidence must be synthetic or sanitised.
 
-Phase names M0-M3 and priorities in issue bodies are planning metadata. They are not a claim that GitHub milestone objects or label automation were created. First Mate may apply actual repository labels/milestones through its supported tools without making their absence a build blocker.
+Phase names M0-M3 and priorities in issue bodies are planning metadata. They are not a claim that GitHub milestone objects or label automation were created. The active coding agent may apply actual repository labels/milestones through supported GitHub tooling without making their absence a build blocker.
 
 ## Public repository boundary
 
