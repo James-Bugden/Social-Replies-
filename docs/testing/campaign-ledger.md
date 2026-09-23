@@ -17,9 +17,23 @@ npm run typecheck      clean
 npm run lint           clean
 npm run check:private  clean
 npm run check:secrets  clean
-npm test               541 passed (36 files)
-npm run test:e2e       58 passed across narrow-600 and wide-1280
+npm test               558 passed (37 files)
+npm run test:e2e       68 passed across narrow-600 and wide-1280
 ```
+
+Run on 2026-09-23 against the content of PR #26, which is the whole stack
+rebased onto `main`. A commit hash is deliberately not quoted here: every merge
+in this stack is a squash, so the hash the tests actually ran at stops existing
+the moment the branch lands, and a ledger citing a dead hash is worse than one
+citing none. Earlier revisions recorded 541 and 58, which were that day's real
+numbers rather than this day's.
+
+Hosted state re-verified the same day against the `Career` project
+(`ap-southeast-2`), after the merge: all 8 migrations present, `auth.users`
+empty, and an anonymous caller holding the publishable key gets **401 on all
+eight probed tables and on `is_app_owner`**, while `/auth/v1/health` answers
+200. The key is therefore live and RLS is what is refusing, rather than the
+request failing to arrive.
 
 ## What this campaign cannot tell you
 
