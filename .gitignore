@@ -37,3 +37,7 @@ temp/
 # TypeScript build cache
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+# Vercel CLI link metadata (project and org ids). Local only.
+.vercel
+
