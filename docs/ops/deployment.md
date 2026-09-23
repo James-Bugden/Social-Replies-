@@ -14,8 +14,8 @@ Everything else is already done and is marked as such.
 | Anonymous access | Revoked on every table and every function; verified by query, not by assumption |
 | pgvector column and index | Created on the hosted project. The type, the `extensions.vector` cast, the HNSW index and the `<=>` operator were checked directly on 2026-09-23 and behave. **Still never exercised against a real row**, because there are none |
 | Owner record in `private.app_owner` | **Created** 2026-09-23. One enabled owner, matching the single auth user. Verified by assuming that user's claims in a rolled-back transaction: `is_app_owner()` returns true and the owner can read the tables |
-| Vercel project | **Not created.** Blocked: the Vercel MCP token is not authorised for the team that holds the account (`403`, scope `james-projects-1242b366`), and the local Vercel CLI token is rejected. Both need an owner sign-in |
-| `replies.jamesbugden.com` | **Not attached**, and the record does not go where the earlier draft of this runbook assumed. See DNS below |
+| Vercel project | **Created** 2026-09-23: `social-replies` in the `james-projects-1242b366` team (Pro), beside `gettheoffer` and separate from it. Git-connected, so a push to `main` deploys production. See "Deployed" below |
+| `replies.jamesbugden.com` | **Not attached.** The app is live on its Vercel address in the meantime. The record goes in Namecheap, not Vercel; see DNS below |
 | Provider credentials | **Not set.** The app runs without them and says so |
 
 ### Where the DNS actually is
@@ -164,7 +164,57 @@ Then, in order:
 11. check response headers on a private route for `Cache-Control: private, no-store`;
 12. confirm the root website and mail still resolve exactly as before.
 
+## Deployed
+
+Recorded on 2026-09-23. Every line was checked against the running deployment,
+not read off a dashboard.
+
+| | |
+|---|---|
+| URL | `https://social-replies.vercel.app` |
+| Commit | `17d1c10` on `main`, deployment `dpl_A7xzzVK8n4kUG89tKK628FFtH14k` |
+| Production settings | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `APP_TIMEZONE`. Nothing else |
+| Preview settings | **None for any branch except `demo`.** C01 wants previews off production data, and on a public repository it also means no pull-request build ever receives them |
+| Demo | `https://social-replies-git-demo-james-projects-1242b366.vercel.app`, built from the `demo` branch. Four settings scoped to that branch alone: `SR_TEST_MODE=e2e`, `AI_PROVIDER=fake`, `EMBEDDING_PROVIDER=fake`, `APP_TIMEZONE`. It runs the in-memory double with synthetic seed data and placeholder ideas, holds no credentials and touches no database. Behind Vercel's own login, so only team members can open it. Its data lives in server memory and can vanish whenever Vercel starts a fresh instance; it is for trying the flow, not for keeping anything |
+| Deliberately unset | `SR_TEST_MODE` (selects the in-memory double and skips auth), `AI_PROVIDER` (`fake` is accepted in production and would show placeholder text as real ideas; unset, the ideas section says it is not set up), `EMBEDDING_PROVIDER`, `RESOURCE_BASE_URL` (the resolver refuses to guess) |
+
+What a signed-out stranger gets, measured the same day:
+
+```
+GET  /                    200  sign-in screen only
+POST /api/test/reset      404  test mode is off
+GET  /api/progress        401
+GET  /api/resources       401
+GET  /api/facts           401
+GET  /api/settings        401
+POST /api/reply/analyse   401  same-origin, still refused
+Cache-Control             private, no-store, max-age=0
+```
+
+Two traps from the first attempt, both now closed in the repository rather than
+in a dashboard:
+
+- `vercel project add` sets no framework preset, so the first build was treated
+  as a static site and failed looking for `public/`. `vercel.json` declares
+  `nextjs`.
+- `vercel link` appended `.env*` to `.gitignore` *after* the `!.env.example`
+  exception, silently re-ignoring the template. Removed.
+
+Supabase Auth URL configuration, set by the owner in the dashboard: Site URL
+`https://social-replies.vercel.app`; redirect URLs exactly
+`https://social-replies.vercel.app/auth/callback` and
+`http://localhost:3000/auth/callback`. No wildcard. **A 200 from the magic-link
+endpoint does not prove a redirect is allowed**: Supabase answers 200 for a
+rejected redirect too and falls back to the Site URL. Only a completed sign-in
+proves it.
+
 ## Rollback
+
+To roll back the app: in the Vercel project, promote the previous **Ready**
+production deployment (`npx vercel rollback` or the dashboard's "Promote"). The
+previous deployment keeps the environment it was built with, so this restores
+code and configuration together. As of this record there is no earlier good
+production deployment: the only other one failed on the framework preset above.
 
 Rollback means promoting the previous verified deployment of **this** app and
 restoring its configuration. It does not mean restoring a database, and it must
