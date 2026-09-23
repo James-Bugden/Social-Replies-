@@ -64,8 +64,19 @@ export function ActionStrip(props: ActionStripProps) {
       setFloating(window.innerHeight >= 640);
     }
     measure();
+
+    // The strip changes height when it swaps to the saved state, and again when a
+    // failure message appears. Measuring only on resize would leave the reserved
+    // space stale and let the strip cover the end of the reply, which is exactly
+    // the content the owner is trying to read at that moment.
+    const observer = new ResizeObserver(measure);
+    if (stripRef.current) observer.observe(stripRef.current);
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
   }, []);
 
   async function copy() {
@@ -86,6 +97,7 @@ export function ActionStrip(props: ActionStripProps) {
   return (
     <div
       ref={stripRef}
+      data-strip="action"
       className={
         floating
           ? 'sticky bottom-0 z-10 border-t border-hairline bg-paper/95 px-4 py-3 backdrop-blur'
@@ -101,6 +113,9 @@ export function ActionStrip(props: ActionStripProps) {
               props.save.progress.targets[props.platform],
             )}
           </StatusLine>
+          {props.save.status === 'saved' && props.save.undoFailed ? (
+            <StatusLine tone="error">{RECORD.undoFailed}</StatusLine>
+          ) : null}
           <div className="mt-2 flex flex-wrap gap-2">
             <Button onClick={props.onUndoRecorded}>{RECORD.undoRecorded}</Button>
             <Button variant="primary" size="primary" onClick={props.onNextReply}>

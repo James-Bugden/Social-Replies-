@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useRef } from 'react';
+import { useRef } from 'react';
 import { Button, Card, Meta, SectionHeading, StatusLine } from './primitives';
 import { EDITOR, MEANING } from '@/lib/workspace/copy';
 import { needsEnglishMeaning, type Platform } from '@/lib/contracts/vocabulary';
@@ -27,6 +27,8 @@ export interface FinalReplyEditorProps {
   hasInsertedResource: boolean;
   canAddPersonalExample: boolean;
   refining: boolean;
+  /** Shown when a rewrite was refused or failed, so a dead press is explained. */
+  notice: string | null;
   onChange(value: string): void;
   onRefine(action: 'shorter' | 'more_direct' | 'warmer' | 'add_personal_example'): void;
   onAcceptProposal(): void;
@@ -36,8 +38,18 @@ export interface FinalReplyEditorProps {
   onRefreshMeaning(): void;
 }
 
+/**
+ * A stable id, not a generated one.
+ *
+ * When the clipboard refuses, the action strip has to select the text so the
+ * owner can copy it with the keyboard. It needs to find this exact textarea: a
+ * generated id would leave it selecting the whole section, labels included, and
+ * the owner would paste the interface into their feed.
+ */
+export const FINAL_EDITOR_ID = 'final-reply-editor';
+
 export function FinalReplyEditor(props: FinalReplyEditorProps) {
-  const editorId = useId();
+  const editorId = FINAL_EDITOR_ID;
   const composing = useRef(false);
   const chinese = needsEnglishMeaning(props.platform);
 
@@ -93,6 +105,8 @@ export function FinalReplyEditor(props: FinalReplyEditorProps) {
           </Button>
         ) : null}
       </div>
+
+      {props.notice ? <StatusLine tone="error">{props.notice}</StatusLine> : null}
 
       {props.proposal ? (
         <Card className="mt-3 border-green bg-green-soft">

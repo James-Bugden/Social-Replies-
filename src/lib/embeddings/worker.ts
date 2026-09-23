@@ -63,6 +63,74 @@ export interface WorkerReport {
 const DEFAULT_BATCH_SIZE = 10;
 
 /**
+ * Whether this process is allowed to embed anything, and for whom.
+ *
+ * A background job has no session, so `auth.uid()` is null and row level
+ * security is not the boundary. C01 is explicit that an administrative
+ * credential does its own owner scoping instead, which means the owner has to be
+ * established before a single row is claimed rather than inferred from whatever
+ * the query happens to return.
+ */
+export type OwnerScope =
+  | { ok: true; ownerId: string }
+  | { ok: false; reason: 'no_enabled_owner' | 'several_enabled_owners' | 'owner_lookup_failed' };
+
+/**
+ * Reads the single enabled owner from the private owner table.
+ *
+ * The table is the only place the owner's id exists (C01): not in this
+ * repository, not in an environment variable a stale deployment could still be
+ * holding, and not in an editable profile row. Anything other than exactly one
+ * enabled row is refused rather than resolved to a guess.
+ */
+export async function resolveOwnerScope(runner: SqlRunner): Promise<OwnerScope> {
+  let rows: { user_id: string }[];
+  try {
+    ({ rows } = await runner.query<{ user_id: string }>(
+      `select o.user_id::text as user_id from private.app_owner o where o.enabled`,
+    ));
+  } catch {
+    // The message can name a schema and a role, and this process logs to a
+    // terminal the owner may well paste somewhere. A code is enough.
+    return { ok: false, reason: 'owner_lookup_failed' };
+  }
+
+  const first = rows[0];
+  if (!first) return { ok: false, reason: 'no_enabled_owner' };
+  if (rows.length > 1) return { ok: false, reason: 'several_enabled_owners' };
+  return { ok: true, ownerId: first.user_id };
+}
+
+export type OwnerScopedPass =
+  | { status: 'ran'; ownerId: string; report: WorkerReport }
+  | { status: 'refused'; reason: Extract<OwnerScope, { ok: false }>['reason'] };
+
+/**
+ * One worker pass, scoped to the enabled owner, or no pass at all.
+ *
+ * This is the entry point a scheduled worker uses, and it exists because calling
+ * `processEmbeddingJobs` with no options over an RLS-bypassing administrative
+ * connection claims and embeds *every* user's rows, sending one account's
+ * private writing to an embedding provider on another account's behalf. Refusing
+ * is the only safe answer to "I cannot tell whose rows these are": an embedding
+ * is never so urgent that it is worth guessing.
+ */
+export async function runOwnerScopedPass(
+  runner: SqlRunner,
+  embedder: Embedder,
+  options: Omit<WorkerOptions, 'ownerId'> = {},
+): Promise<OwnerScopedPass> {
+  const scope = await resolveOwnerScope(runner);
+  if (!scope.ok) return { status: 'refused', reason: scope.reason };
+
+  const report = await processEmbeddingJobs(runner, embedder, {
+    ...options,
+    ownerId: scope.ownerId,
+  });
+  return { status: 'ran', ownerId: scope.ownerId, report };
+}
+
+/**
  * Claims due jobs and holds them for `leaseSeconds`.
  *
  * `for update skip locked` handles two workers racing inside the same instant;

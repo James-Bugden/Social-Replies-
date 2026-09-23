@@ -14,6 +14,10 @@ import type {
   RefineResponse,
   SessionPatchRequest,
   SessionPatchResponse,
+  LibrarySearchRequest,
+  LibrarySearchResponse,
+  LibraryPatchRequest,
+  ManualReplyRequest,
 } from '@/lib/contracts/api';
 import type { ErrorEnvelope } from '@/lib/contracts/errors';
 
@@ -105,6 +109,34 @@ export const api = {
     }),
 
   progress: (signal?: AbortSignal) => send<Progress>('/api/progress', 'GET', undefined, signal),
+
+  librarySearch: (body: LibrarySearchRequest, signal?: AbortSignal) =>
+    send<LibrarySearchResponse>('/api/library/search', 'POST', body, signal),
+
+  libraryPatch: (id: string, body: LibraryPatchRequest) =>
+    send<{ ok: true }>(`/api/library/${id}`, 'PATCH', body),
+
+  manualReply: (body: ManualReplyRequest, idempotencyKey: string) =>
+    fetch('/api/replies/manual', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
+      body: JSON.stringify(body),
+    }).then(async (response) => {
+      if (!response.ok) {
+        const envelope = (await response.json().catch(() => null)) as ErrorEnvelope | null;
+        throw new ApiError(
+          response.status,
+          envelope ?? {
+            code: 'internal_error',
+            message: "Couldn't save that reply. Your text is still here.",
+            retryable: true,
+            request_id: 'unknown',
+          },
+        );
+      }
+      return (await response.json()) as MarkPostedResponse;
+    }),
 };
 
 /**

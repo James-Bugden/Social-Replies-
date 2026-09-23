@@ -3,6 +3,9 @@ import type { OwnerSession } from '@/lib/auth/owner';
 import type { Store } from './store';
 import { createMemoryStore } from './memory-store';
 import { createSupabaseStore } from './supabase-store';
+import { isTestMode } from './test-mode';
+
+export { isTestMode } from './test-mode';
 
 /**
  * Selects the data layer.
@@ -16,21 +19,29 @@ import { createSupabaseStore } from './supabase-store';
  * spans several requests and has to see its own writes.
  */
 
-let memorySingleton: Store | null = null;
+/**
+ * The double is held on `globalThis`, not in a module variable.
+ *
+ * Next.js bundles server components and route handlers separately, so a
+ * module-level singleton gives the page and the API *different* stores: the page
+ * renders a count of 0 while the API already recorded a reply. A browser journey
+ * then fails for a reason that has nothing to do with the product. One global
+ * keeps the whole request path looking at one set of rows.
+ */
+const MEMORY_STORE_KEY = Symbol.for('social-replies.memory-store');
 
-export function isTestMode(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
-  return env.SR_TEST_MODE === 'e2e';
-}
+type GlobalWithStore = typeof globalThis & { [MEMORY_STORE_KEY]?: Store };
 
 export function getStore(session: OwnerSession): Store {
   if (isTestMode()) {
-    memorySingleton ??= createMemoryStore();
-    return memorySingleton;
+    const scope = globalThis as GlobalWithStore;
+    scope[MEMORY_STORE_KEY] ??= createMemoryStore();
+    return scope[MEMORY_STORE_KEY];
   }
   return createSupabaseStore(session);
 }
 
 /** Test seam. Lets a journey start from a known state. */
 export function resetMemoryStore(): void {
-  memorySingleton = null;
+  delete (globalThis as GlobalWithStore)[MEMORY_STORE_KEY];
 }

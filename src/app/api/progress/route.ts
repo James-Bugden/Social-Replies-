@@ -1,27 +1,23 @@
-import { ownerRoute, unwrapRpc } from '@/lib/server/owner-route';
+import { ownerRoute } from '@/lib/server/owner-route';
 import { jsonResponse } from '@/lib/server/http';
+import { getStore } from '@/lib/server/get-store';
 import { publicConfig } from '@/lib/config/env';
-import { progressSchema, type Progress } from '@/lib/contracts/api';
+import { progressSchema } from '@/lib/contracts/api';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/progress (C07, DAY-01).
  *
- * The response carries counts and targets and nothing else. There is no private
- * body here on purpose: this is the one endpoint polled on every window focus, and
- * a poll that carried reply text would put the owner's writing into far more
- * request logs than a save does.
+ * Counts and targets, and nothing else. This is the one endpoint polled on every
+ * window focus, so a body carrying reply text would put the owner's writing into
+ * far more request logs than a save ever does.
  *
- * The local day is computed on the server from the configured timezone. A browser
- * in another timezone therefore sees the same Taipei day the counter uses.
+ * The local day is computed on the server from the configured timezone, so a
+ * browser in another timezone still sees the Taipei day the counter uses.
  */
 export const GET = ownerRoute(async (_request, { session }) => {
-  const timezone = publicConfig().timezone;
-
-  const result = unwrapRpc<Progress>(
-    await session.supabase.rpc('daily_counts', { p_timezone: timezone }),
-  );
-
-  return jsonResponse(progressSchema.parse(result));
+  const store = getStore(session);
+  const progress = await store.dailyCounts(publicConfig().timezone);
+  return jsonResponse(progressSchema.parse(progress));
 });

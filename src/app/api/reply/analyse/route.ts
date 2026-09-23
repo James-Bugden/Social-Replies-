@@ -21,6 +21,7 @@ export const POST = ownerRoute(async (request, { session }) => {
   const store = getStore(session);
 
   const result = await store.analyse({
+    requestKey: body.request_key,
     platform: body.platform,
     targetKind: body.target_kind,
     sourceText: body.source_text,
