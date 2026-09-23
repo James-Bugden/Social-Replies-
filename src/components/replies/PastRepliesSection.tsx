@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Button, Card, Meta, Pill, SectionHeading, StatusLine } from './primitives';
+import { Button, Card, Meta, Pill, ReplyText, SectionHeading, StatusLine } from './primitives';
 import { HISTORY } from '@/lib/workspace/copy';
 import { localDayOf } from '@/lib/workspace/dates';
 import { PLATFORM_LABELS, type Provenance } from '@/lib/contracts/vocabulary';
@@ -60,12 +60,7 @@ function PastReplyRow({
         </Pill>
       </div>
 
-      <p
-        className={isChinese ? 'sr-cjk text-reply' : 'text-reply'}
-        {...(isChinese ? { lang: 'zh-TW' } : {})}
-      >
-        {expanded ? reply.full_text : excerptOf(reply.full_text)}
-      </p>
+      <ReplyText text={expanded ? reply.full_text : excerptOf(reply.full_text)} chinese={isChinese} />
 
       <div className="mt-2 flex flex-wrap gap-2">
         {reply.full_text.length > 160 ? (

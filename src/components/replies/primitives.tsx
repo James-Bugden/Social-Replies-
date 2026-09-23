@@ -82,6 +82,37 @@ export function Meta({ children, className }: { children: ReactNode; className?:
 }
 
 /**
+ * Reply text, shown the way it will look once posted.
+ *
+ * Every read-only view of a reply used a plain paragraph, and HTML collapses line
+ * breaks, so a three-paragraph idea displayed as one run-on block while the editor
+ * showed the same text with its breaks. The preview disagreed with what would be
+ * posted, which is the one thing a preview must not do.
+ *
+ * `pre-wrap` keeps line breaks and blank lines exactly as written; long unbroken
+ * runs such as a link wrap instead of pushing the card wider than a phone.
+ * Chinese gets its looser line height and a language tag for screen readers.
+ */
+export function ReplyText({
+  text,
+  chinese = false,
+  className,
+}: {
+  text: string;
+  chinese?: boolean;
+  className?: string;
+}) {
+  return (
+    <p
+      className={cx('whitespace-pre-wrap [overflow-wrap:anywhere] text-reply', chinese && 'sr-cjk', className)}
+      {...(chinese ? { lang: 'zh-TW' } : {})}
+    >
+      {text}
+    </p>
+  );
+}
+
+/**
  * A status line that assistive technology announces once, politely.
  *
  * Polite and not assertive because these announcements arrive while the owner is

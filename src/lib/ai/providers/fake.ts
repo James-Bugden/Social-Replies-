@@ -49,8 +49,10 @@ const ENGLISH_SHAPES = [
   },
   {
     label: 'Recruiter perspective',
+    // Two paragraphs on purpose: real replies have line breaks, and a stand-in
+    // with none is how a display that collapsed them went unnoticed.
     body: (topic: string) =>
-      `Example reply. From the hiring side, ${topic} is rarely the thing that decides it. The shortlist usually turns on whether the first two lines answer the question the role is asking.`,
+      `Example reply. From the hiring side, ${topic} is rarely the thing that decides it.\n\nThe shortlist usually turns on whether the first two lines answer the question the role is asking.`,
   },
 ];
 

@@ -28,14 +28,19 @@ export function SignOutButton() {
     // First, and unconditionally.
     forgetDraft();
 
+    // A full page load rather than a client-side route change, deliberately: it
+    // discards every piece of in-memory state, including any copy of the draft a
+    // mounted component still holds. A router push would keep all of it alive.
     const client = getBrowserClient();
     if (!client) {
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- see above
       window.location.assign('/login');
       return;
     }
 
     try {
       await client.auth.signOut();
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- see above
       window.location.assign('/login');
     } catch {
       // The local session is gone either way; say so rather than pretending the

@@ -82,6 +82,31 @@ export const IDEAS = {
   showMeaning: 'English meaning',
 } as const;
 
+/**
+ * The formatting toolbar, worded as in Content Studio so the two tools read alike.
+ * Nothing here says "markdown is bad"; it says what the platform will do with it.
+ */
+export const FORMAT = {
+  toolbar: 'Formatting',
+  bold: 'B',
+  boldLabel: 'Bold',
+  italic: 'I',
+  italicLabel: 'Italic',
+  bullets: '• List',
+  bulletsLabel: 'Bulleted list',
+  numbers: '1. List',
+  numbersLabel: 'Numbered list',
+  clear: 'Clear style',
+  clearLabel: 'Remove bold and italic from the selection',
+  count: (length: number, limit: number) =>
+    `${length.toLocaleString('en-GB')} / ${limit.toLocaleString('en-GB')} characters`,
+  over: (platform: string) => `Over the ${platform} limit`,
+  markdownFound: (kinds: string, platform: string) =>
+    `This has markdown (${kinds}). ${platform} will show those symbols as typed.`,
+  cleanUp: 'Clean up markdown',
+  note: 'Bold and italic use special letters. Screen readers may spell them out, so keep them to a few words.',
+} as const;
+
 export const EDITOR = {
   heading: 'Your reply',
   label: 'Your reply',
