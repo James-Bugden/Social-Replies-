@@ -1,6 +1,6 @@
 # Social Replies: product plan and implementation specification
 
-Revision 2. Prepared 2026-09-22. Repository: `James-Bugden/Social-Replies-` (public). Product: an authenticated single-user app. Temporary app URL: `https://replies.jamesbugden.com`. Build owner: First Mate; implementation/browser review: the configured coding workflow and Orca.
+Revision 2. Prepared 2026-09-22. Repository: `James-Bugden/Social-Replies-` (public). Product: an authenticated single-user app. Temporary app URL: `https://replies.jamesbugden.com`. Build owner: the active coding agent under `AGENTS.md`; implementation/browser review: the configured tool-neutral coding workflow, with Orca or equivalent tooling when useful.
 
 **Status:** product/implementation planning and inspected Mobbin research are supplied. The interactive comparison is synthetic design evidence. The production app, real-data backfill, model benchmark, Orca review and deployment are not claimed complete.
 
@@ -135,9 +135,9 @@ Versioned server drafts are canonical working state. Tab-local recovery is short
 5. #20 runs independent quality charters as features arrive. File defects and continue unblocked tests while fix workers add regressions. Only dependent rows stop. Security/data-loss defects block release.
 6. #21 provisions previews early, then promotes only after the required release evidence and verifies the actual deployed build.
 
-The issue index supplies exact dependency links. No nonexistent SR-000 dependency remains. First Mate chooses appropriate worker/model/effort from its current supported setup, preserves merge authority and uses isolated worktrees. Do not claim an agent has been launched from this planning conversation.
+The issue index supplies exact dependency links. No nonexistent SR-000 dependency remains. The active coding agent/orchestrator chooses appropriate worker/model/effort, follows the repository auto-merge policy, and uses isolated worktrees or managed isolated checkouts. The workflow must remain portable across Claude, Codex, Orca, or equivalent agents.
 
-Pause only for genuine owner-only inputs: private authentication/bootstrap access, provider billing/keys, authorised exports, DNS access or a consequential security/cost decision. Do not ask the nontechnical owner to implement routine setup. Never request posting secrets into a public issue or chat transcript.
+Pause only for genuine owner-only inputs under `AGENTS.md`: required private authentication/bootstrap access that the runtime cannot obtain, provider billing/keys, authorised exports, DNS/account permission, a consequential security/privacy or money-movement decision, irreversible production-data risk, or approval of a genuinely new design direction/large material UX change. Do not ask the nontechnical owner to implement routine setup.
 
 Prior 5-8/12-25 hour estimates were not measured. Build the first vertical slice, record actual effort and blockers, then forecast remaining work. More agents do not turn verification and private-source dependencies into guaranteed elapsed hours.
 

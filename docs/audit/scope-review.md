@@ -55,6 +55,6 @@ Local deliverable bytes were compared using Git blob SHA-1 to the committed core
 
 ## Remaining implementation, not unfinished planning
 
-First Mate still must build the application, configure authorised private credentials/data, validate actual source adapters and model quality, perform Orca/device checks where required and deploy/verify the promoted build. Missing private exports block only the affected backfill, not the synthetic engineering work. Do not reopen broad design discovery or close production issues merely because the planning package is complete.
+The active coding agent still must build the application, configure authorised private credentials/data, validate actual source adapters and model quality, perform Orca/device checks where required, and deploy/verify the promoted build under `AGENTS.md`. Missing private exports block only the affected backfill, not the synthetic engineering work. Do not reopen broad design discovery or close production issues merely because the planning package is complete.
 
 [Product specification](../../SOCIAL-REPLIES-IMPLEMENTATION-SPEC.md) · [Issue index](../../SOCIAL-REPLIES-GITHUB-ISSUES.md) · [Research](../design/mobbin-research.md) · [Prototype checks](../design/prototype-checks.json) · [Acceptance matrix](../testing/acceptance-matrix.md)
