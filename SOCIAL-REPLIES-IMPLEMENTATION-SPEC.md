@@ -2,6 +2,13 @@
 
 Revision 2. Prepared 2026-09-22. Repository: `James-Bugden/Social-Replies-` (public). Product: an authenticated single-user app. Temporary app URL: `https://replies.jamesbugden.com`. Build owner: the active coding agent under `AGENTS.md`; implementation/browser review: the configured tool-neutral coding workflow, with Orca or equivalent tooling when useful.
 
+**Retirement decision (2026-09-25):** the owner's newer instruction to combine
+Social Replies and Content Studio in one codebase and UI supersedes the separate
+deployment direction below. The live Replies workspace is now
+`https://content-studio-blond-rho.vercel.app/replies`. The standalone deployment
+uses a temporary, reversible redirect and retains its code and Supabase data for
+rollback; it does not import historical replies into the combined app.
+
 **Status:** product/implementation planning and inspected Mobbin research are supplied. The interactive comparison is synthetic design evidence. The production app, real-data backfill, model benchmark, Orca review and deployment are not claimed complete.
 
 ## 1. Authority and how to read this specification

@@ -1,5 +1,10 @@
 # Social Replies
 
+> **Retired standalone UI.** Social Replies now lives inside Content Studio at
+> <https://content-studio-blond-rho.vercel.app/replies>. This repository remains
+> intact as a rollback reference and its production deployment temporarily
+> redirects every route to the combined workspace. No Supabase data was deleted.
+
 A private, single-user assistant for writing and remembering useful LinkedIn, X and Threads replies. Keep the feed in one window and Social Replies in the other.
 
 Paste a post/comment -> see past writing -> see shareable resources -> choose among three reply ideas -> edit -> copy and post manually -> mark posted -> remember the exact final reply.
