@@ -1,5 +1,8 @@
 import type { NextConfig } from 'next';
 
+export const CANONICAL_REPLIES_URL =
+  'https://content-studio-blond-rho.vercel.app/replies';
+
 /**
  * Private single-user app. Nothing here may be cached by a shared cache and no
  * response containing owner writing may be stored. C10 requires private no-store
@@ -10,6 +13,15 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   typescript: { ignoreBuildErrors: false },
+  async redirects() {
+    return [
+      {
+        source: '/:path*',
+        destination: CANONICAL_REPLIES_URL,
+        permanent: false,
+      },
+    ];
+  },
   async headers() {
     return [
       {

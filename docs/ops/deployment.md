@@ -1,5 +1,25 @@
 # Deployment
 
+## Standalone retirement (2026-09-25)
+
+The owner chose one Content Studio codebase and UI. The canonical Replies
+workspace is now:
+
+```
+https://content-studio-blond-rho.vercel.app/replies
+```
+
+The standalone Vercel deployment temporarily redirects every route there with
+HTTP 307. This is deliberately reversible: rollback by promoting the previous
+verified standalone deployment. Do not drop, truncate or migrate the standalone
+Supabase tables as part of the redirect. Historical replies are not imported;
+the combined app learns prospectively from replies recorded there.
+
+Post-deploy verification for the retired deployment is now limited to proving
+that `/`, a legacy page, an API path and the auth callback all return 307 with
+the exact canonical destination. The authenticated product smoke belongs to the
+combined Content Studio deployment.
+
 SR-020 (#21). This is the procedure, not a record that it has been carried out.
 Nothing in this repository should be read as a claim that the app is deployed.
 

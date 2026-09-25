@@ -7,6 +7,7 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './tests/e2e',
+  testMatch: 'retirement.spec.ts',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,
@@ -26,7 +27,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run build && npm run start -- --port 3100',
-    url: 'http://127.0.0.1:3100/api/health',
+    url: 'http://127.0.0.1:3100/',
     reuseExistingServer: !process.env.CI,
     timeout: 240_000,
     env: {
